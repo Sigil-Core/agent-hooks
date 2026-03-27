@@ -113,6 +113,67 @@ describe('checkIntent', () => {
     warnSpy.mockRestore();
   });
 
+  it('returns APPROVED on non-JSON response body (fail-open)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response('<html>502 Bad Gateway</html>', {
+        status: 502,
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    );
+
+    const onError = vi.fn();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const config = { ...BASE_CONFIG, onError };
+    const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+    const result = await checkIntent(intent, config);
+
+    expect(result.decision).toBe('APPROVED');
+    expect(result.message).toBe('Sigil unreachable — fail open');
+    expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
+    expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it('preserves policyHash on DENIED result', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'DENIED',
+          error_code: 'SIGIL_BASH_BLOCKED',
+          message: 'Blocked',
+          policyHash: 'policy_hash_xyz',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const intent: SigilIntent = { action: 'bash', command: 'rm -rf /' };
+    const result = await checkIntent(intent, BASE_CONFIG);
+
+    expect(result.decision).toBe('DENIED');
+    expect(result.policyHash).toBe('policy_hash_xyz');
+  });
+
+  it('preserves policyHash on PENDING result', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'PENDING',
+          holdId: 'hold_abc',
+          policyHash: 'policy_hash_pending',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const intent: SigilIntent = { action: 'email.send' };
+    const result = await checkIntent(intent, BASE_CONFIG);
+
+    expect(result.decision).toBe('PENDING');
+    expect(result.policyHash).toBe('policy_hash_pending');
+  });
+
   it('sends correct request shape to /v1/authorize', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ status: 'APPROVED' }), {

@@ -28,9 +28,9 @@ export async function checkIntent(
     },
   };
 
-  let response: Response;
+  let data: Record<string, unknown>;
   try {
-    response = await fetch(`${apiUrl}/v1/authorize`, {
+    const response = await fetch(`${apiUrl}/v1/authorize`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -38,6 +38,7 @@ export async function checkIntent(
       },
       body: JSON.stringify(body),
     });
+    data = await response.json() as Record<string, unknown>;
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
     config.onError?.(intent, error);
@@ -50,8 +51,6 @@ export async function checkIntent(
     return { decision: 'APPROVED', message: 'Sigil unreachable — fail open' };
   }
 
-  const data = await response.json() as Record<string, unknown>;
-
   if (data['status'] === 'APPROVED') {
     return {
       decision: 'APPROVED',
@@ -59,12 +58,15 @@ export async function checkIntent(
     };
   }
 
+  const policyHash = data['policyHash'] as string | undefined;
+
   if (data['status'] === 'PENDING') {
     const holdId = data['holdId'] as string;
     config.onPending?.(intent, holdId);
     return {
       decision: 'PENDING',
       holdId,
+      policyHash,
       message: data['message'] as string | undefined,
     };
   }
@@ -72,7 +74,7 @@ export async function checkIntent(
   const errorCode = (data['error_code'] as string) ?? 'SIGIL_POLICY_VIOLATION';
   const message = (data['message'] as string) ?? 'Action blocked by policy';
   config.onDenied?.(intent, message);
-  return { decision: 'DENIED', errorCode, message };
+  return { decision: 'DENIED', errorCode, message, policyHash };
 }
 
 function generateIntentCommit(intent: SigilIntent): string {
