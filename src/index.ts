@@ -1,0 +1,16 @@
+// src/index.ts
+
+export { checkIntent } from './interceptor.js';
+export { buildRejectionContext } from './rejection.js';
+export { checkAnthropicToolUse } from './adapters/claude.js';
+export { checkElizaAction } from './adapters/eliza.js';
+export { wrapLangChainTool } from './adapters/langchain.js';
+export type {
+  SigilDecision,
+  SigilIntent,
+  SigilHookConfig,
+  SigilHookResult,
+  SigilRejectionContext,
+} from './types.js';
+export type { AnthropicToolUseBlock } from './adapters/claude.js';
+export type { ElizaAction } from './adapters/eliza.js';
