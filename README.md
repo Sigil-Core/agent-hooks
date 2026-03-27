@@ -89,6 +89,7 @@ For held actions:
   "sigil_error_code": "SIGIL_CONSENSUS_HOLD_REQUIRED",
   "sigil_message": "Email requires human approval",
   "sigil_hold_id": "hold_abc123",
+  "sigil_policy_hash": "abc123def456",
   "sigil_action_taken": "pending_approval",
   "sigil_next_steps": "This action has been paused for human review. Do not retry. Notify the operator via Sigil Command."
 }
