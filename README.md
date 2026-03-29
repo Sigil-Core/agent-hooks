@@ -66,6 +66,35 @@ const safeTool = wrapLangChainTool(myTool, config);
 // safeTool.call() now checks Sigil policy before executing
 ```
 
+## Works With AgentPay (WLFI)
+
+[AgentPay SDK](https://github.com/World-Liberty-Financial-X) enables AI agents to hold and spend USD1 on EVM chains. `@sigilcore/agent-hooks` is fully compatible — no additional configuration needed.
+
+When an AgentPay agent executes a USD1 transfer on Ethereum (chainId 1) or BNB Smart Chain (chainId 56), the `wallet.transfer` or `wallet_sign` action routes through your Sigil policy before the transaction is signed.
+
+```typescript
+import { checkIntent } from '@sigilcore/agent-hooks';
+
+// AgentPay initiates a USD1 transfer — Sigil evaluates policy first
+const result = await checkIntent({
+  action: 'wallet.transfer',
+  chainId: 1,                          // Ethereum mainnet
+  to: '0xRecipientAddress',
+  amount: '1000000000000000000',       // 1 USD1 in wei
+  txCommit: sha256(rawTx),
+}, config);
+
+if (result.decision !== 'APPROVED') {
+  // Block the AgentPay transfer — policy not satisfied
+  return buildRejectionContext(result, 'wallet.transfer');
+}
+// AgentPay proceeds with signing
+```
+
+**The layers are additive:** AgentPay handles payment mechanics and key management. Sigil determines whether the agent is authorized to initiate the payment at all. AgentPay tells agents how to spend. Sigil tells agents what they're allowed to do.
+
+USD1 contract address: `0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d` (Ethereum + BSC)
+
 ## Graceful Agent Degradation
 
 When an action is blocked, the package returns a typed JSON rejection context that agents can understand:
