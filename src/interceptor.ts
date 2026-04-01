@@ -13,7 +13,7 @@ export async function checkIntent(
   const txCommit = intent.txCommit ?? generateIntentCommit(intent);
 
   const body = {
-    framework: 'agent-hooks',
+    framework: config.framework ?? 'agent-hooks',
     agentId,
     txCommit,
     chainId: intent.chainId,
