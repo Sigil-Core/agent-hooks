@@ -210,4 +210,19 @@ describe('checkIntent', () => {
     expect(body.chainId).toBe(1);
     expect(typeof body.txCommit).toBe('string');
   });
+
+  it('uses custom framework from config when provided', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'APPROVED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+    await checkIntent(intent, { ...BASE_CONFIG, framework: 'openclaw' });
+
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.framework).toBe('openclaw');
+  });
 });

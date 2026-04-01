@@ -19,6 +19,7 @@ export interface SigilHookConfig {
   apiKey: string;          // sk_sigil_... from sigilcore.com/tools/keys
   apiUrl?: string;         // default: https://sign.sigilcore.com
   agentId?: string;        // default: 'agent'
+  framework?: string;      // default: 'agent-hooks' — see framework-registry.json
   onDenied?: (intent: SigilIntent, reason: string) => void;
   onPending?: (intent: SigilIntent, holdId: string) => void;
   onError?: (intent: SigilIntent, error: Error) => void;
