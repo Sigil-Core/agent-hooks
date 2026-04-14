@@ -3,3 +3,10 @@ dist/
 *.env
 .env.local
 
+
+# Sigil internal agent context (never push to public repos)
+CLAUDE.md
+AGENTS.md
+agents-global.md
+_MANIFEST.md
+.DS_Store
