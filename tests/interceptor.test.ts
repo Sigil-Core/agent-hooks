@@ -107,6 +107,7 @@ describe('checkIntent', () => {
 
     expect(result.decision).toBe('APPROVED');
     expect(result.message).toBe('Sigil unreachable — fail open');
+    expect(result.failOpen).toBe(true);
     expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
     expect(warnSpy).toHaveBeenCalled();
 
@@ -115,8 +116,8 @@ describe('checkIntent', () => {
 
   it('returns APPROVED on non-JSON response body (fail-open)', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response('<html>502 Bad Gateway</html>', {
-        status: 502,
+      new Response('<html>not json</html>', {
+        status: 200,
         headers: { 'Content-Type': 'text/html' },
       }),
     );
@@ -129,6 +130,7 @@ describe('checkIntent', () => {
 
     expect(result.decision).toBe('APPROVED');
     expect(result.message).toBe('Sigil unreachable — fail open');
+    expect(result.failOpen).toBe(true);
     expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
     expect(warnSpy).toHaveBeenCalled();
 
@@ -224,5 +226,186 @@ describe('checkIntent', () => {
 
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
     expect(body.framework).toBe('openclaw');
+  });
+
+  it('returns APPROVED + failOpen:true on 5xx in open mode (default)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'APPROVED' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+    const result = await checkIntent(intent, BASE_CONFIG);
+
+    expect(result.decision).toBe('APPROVED');
+    expect(result.failOpen).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  describe('failMode: closed', () => {
+    it('returns DENIED + SIGIL_UNREACHABLE when fetch throws', async () => {
+      vi.mocked(fetch).mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+      const onError = vi.fn();
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = { ...BASE_CONFIG, failMode: 'closed' as const, onError };
+      const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+      const result = await checkIntent(intent, config);
+
+      expect(result.decision).toBe('DENIED');
+      expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+      expect(result.message).toBe('ECONNREFUSED');
+      expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
+      expect(warnSpy).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
+
+    it('logs sigil_hook_unreachable at error level in closed mode', async () => {
+      vi.mocked(fetch).mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = { ...BASE_CONFIG, failMode: 'closed' as const };
+      const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+      await checkIntent(intent, config);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(warnSpy.mock.calls[0][0] as string);
+      expect(payload.event).toBe('sigil_hook_unreachable');
+      expect(payload.level).toBe('error');
+      expect(payload.failMode).toBe('closed');
+      expect(payload.action).toBe('bash');
+      expect(payload.message).toBe('ECONNREFUSED');
+
+      warnSpy.mockRestore();
+    });
+
+    it('returns DENIED + SIGIL_UNREACHABLE on 500 response in closed mode', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'APPROVED' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = { ...BASE_CONFIG, failMode: 'closed' as const };
+      const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+      const result = await checkIntent(intent, config);
+
+      expect(result.decision).toBe('DENIED');
+      expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+
+      warnSpy.mockRestore();
+    });
+
+    it('returns DENIED + SIGIL_UNREACHABLE on 502/503 in closed mode', async () => {
+      for (const status of [502, 503]) {
+        vi.mocked(fetch).mockResolvedValueOnce(
+          new Response(JSON.stringify({}), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const config = { ...BASE_CONFIG, failMode: 'closed' as const };
+        const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+        const result = await checkIntent(intent, config);
+
+        expect(result.decision).toBe('DENIED');
+        expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('returns DENIED + SIGIL_UNREACHABLE when response body is not JSON (path b)', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response('<html>not json</html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      );
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = { ...BASE_CONFIG, failMode: 'closed' as const };
+      const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+      const result = await checkIntent(intent, config);
+
+      expect(result.decision).toBe('DENIED');
+      expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+
+      warnSpy.mockRestore();
+    });
+
+    it('returns DENIED + SIGIL_UNREACHABLE when fetch times out (closed mode)', async () => {
+      vi.mocked(fetch).mockImplementationOnce(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            const signal = (init as RequestInit | undefined)?.signal;
+            if (signal) {
+              signal.addEventListener('abort', () => {
+                const err = new Error('The operation was aborted.');
+                err.name = 'AbortError';
+                reject(err);
+              });
+            }
+          }),
+      );
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = { ...BASE_CONFIG, failMode: 'closed' as const, requestTimeoutMs: 10 };
+      const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+      const result = await checkIntent(intent, config);
+
+      expect(result.decision).toBe('DENIED');
+      expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+
+      warnSpy.mockRestore();
+    });
+  });
+
+  it('returns APPROVED + failOpen:true when fetch times out (open mode)', async () => {
+    vi.mocked(fetch).mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = (init as RequestInit | undefined)?.signal;
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted.');
+              err.name = 'AbortError';
+              reject(err);
+            });
+          }
+        }),
+    );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+    const result = await checkIntent(intent, { ...BASE_CONFIG, requestTimeoutMs: 10 });
+
+    expect(result.decision).toBe('APPROVED');
+    expect(result.failOpen).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  it('logs sigil_hook_unreachable at warn level in open mode (default)', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+    await checkIntent(intent, BASE_CONFIG);
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    expect(payload.event).toBe('sigil_hook_unreachable');
+    expect(payload.level).toBe('warn');
+    expect(payload.failMode).toBe('open');
+
+    warnSpy.mockRestore();
   });
 });

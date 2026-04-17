@@ -2,6 +2,8 @@
 
 export type SigilDecision = 'APPROVED' | 'DENIED' | 'PENDING';
 
+export const SIGIL_UNREACHABLE = 'SIGIL_UNREACHABLE' as const;
+
 export interface SigilIntent {
   action: string;          // e.g. 'bash', 'web_fetch', 'file_write', 'wallet.transfer'
   agentId?: string;
@@ -19,7 +21,9 @@ export interface SigilHookConfig {
   apiKey: string;          // sk_sigil_... from sigilcore.com/tools/keys
   apiUrl?: string;         // default: https://sign.sigilcore.com
   agentId?: string;        // default: 'agent'
-  framework?: string;      // default: 'agent-hooks' — see framework-registry.json
+  framework?: string;      // default: 'agent-hooks' — see framework-registry.ts
+  failMode?: 'open' | 'closed';    // default: 'open'
+  requestTimeoutMs?: number;       // default: 10_000
   onDenied?: (intent: SigilIntent, reason: string) => void;
   onPending?: (intent: SigilIntent, holdId: string) => void;
   onError?: (intent: SigilIntent, error: Error) => void;
@@ -31,6 +35,7 @@ export interface SigilHookResult {
   errorCode?: string;
   message?: string;
   policyHash?: string;
+  failOpen?: boolean;      // true when APPROVED was returned via fail-open (not real policy evaluation)
 }
 
 // Graceful Agent Degradation — typed JSON fed back to the agent context
