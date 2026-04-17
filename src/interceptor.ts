@@ -1,5 +1,5 @@
 // src/interceptor.ts
-import { createHash } from 'node:crypto';
+import { buildAuthorizeRequestBody } from './request.js';
 import type { SigilHookConfig, SigilHookResult, SigilIntent } from './types.js';
 import { SIGIL_UNREACHABLE } from './types.js';
 
@@ -10,24 +10,7 @@ export async function checkIntent(
   config: SigilHookConfig,
 ): Promise<SigilHookResult> {
   const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
-  const agentId = config.agentId ?? intent.agentId ?? 'agent';
-  const txCommit = intent.txCommit ?? generateIntentCommit(intent);
-
-  const body = {
-    framework: config.framework ?? 'agent-hooks',
-    agentId,
-    txCommit,
-    chainId: intent.chainId,
-    intent: {
-      action: intent.action,
-      command: intent.command,
-      url: intent.url,
-      path: intent.path,
-      targetAddress: intent.to,
-      amount: intent.amount,
-      metadata: intent.metadata,
-    },
-  };
+  const body = buildAuthorizeRequestBody(intent, config);
 
   const timeoutMs = config.requestTimeoutMs ?? 10_000;
   const controller = new AbortController();
@@ -94,17 +77,4 @@ export async function checkIntent(
   const message = (data['message'] as string) ?? 'Action blocked by policy';
   config.onDenied?.(intent, message);
   return { decision: 'DENIED', errorCode, message, policyHash };
-}
-
-function generateIntentCommit(intent: SigilIntent): string {
-  const preimage = JSON.stringify({
-    action: intent.action,
-    command: intent.command,
-    url: intent.url,
-    path: intent.path,
-    to: intent.to,
-    amount: intent.amount,
-    ts: Math.floor(Date.now() / 1000),
-  });
-  return createHash('sha256').update(preimage).digest('hex');
 }
