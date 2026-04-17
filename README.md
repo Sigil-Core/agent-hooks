@@ -131,19 +131,45 @@ For held actions:
 | `apiKey` | `string` | Yes | — | Sigil API key (`sk_sigil_...`) |
 | `apiUrl` | `string` | No | `https://sign.sigilcore.com` | Sigil Sign API URL |
 | `agentId` | `string` | No | `'agent'` | Identifier for this agent |
+| `framework` | `string` | No | `'agent-hooks'` | Framework identifier — see [`FRAMEWORKS`](./src/framework-registry.ts) |
+| `failMode` | `'open' \| 'closed'` | No | `'open'` | Behavior when Sigil is unreachable — see Fail Modes below |
+| `requestTimeoutMs` | `number` | No | `10000` | Request timeout in milliseconds |
 | `onDenied` | `function` | No | — | Callback when action is denied |
 | `onPending` | `function` | No | — | Callback when action is held |
 | `onError` | `function` | No | — | Callback on network error |
 
-## Fail-Open Behavior
+## Fail Modes
 
-Network errors to the Sigil Sign API result in a **fail-open APPROVED** decision with a warn log. This is intentional:
+When the Sigil Sign API is unreachable — network partition, DNS failure, connection refused, request timeout, 5xx response, or a non-JSON body — `@sigilcore/agent-hooks` either fails open or fails closed based on `config.failMode`.
 
-- Sigil is a governance layer, not a kill switch
-- Agent workflows must not break when Sigil is temporarily unreachable
-- The warn log provides an audit trail of ungoverned calls during outages
+### `failMode: 'open'` (default)
 
-Operators who require fail-closed behavior should handle the `onError` callback and implement their own circuit breaker.
+Returns `{ decision: 'APPROVED', failOpen: true, message: 'Sigil unreachable — fail open' }` plus a `warn`-level JSON log line (`event: 'sigil_hook_unreachable'`).
+
+**Use when:** development, non-financial workflows, general-purpose agents where a brief Sigil outage should not halt operations.
+
+### `failMode: 'closed'`
+
+Returns `{ decision: 'DENIED', errorCode: 'SIGIL_UNREACHABLE', message: <cause> }` plus an `error`-level JSON log line. The returned error code is **distinct** from policy denial — hosts can branch on it to emit transient-failure telemetry rather than policy-violation telemetry. `buildRejectionContext` produces next-step guidance that tells the agent to pause and retry when connectivity is restored, not to report a policy violation.
+
+**Use when:** production agents, externally-visible actions (email sending, customer messages), and — **required** — any on-chain or wallet-related action.
+
+### When to pick which
+
+| Scenario | Recommended |
+|---|---|
+| Local dev / non-financial | `'open'` |
+| Production, general-purpose | `'closed'` |
+| Production, externally visible (email.send, messaging) | `'closed'` |
+| Production, financial or on-chain (`wallet.*`) | `'closed'` (required — see AgentPay section) |
+
+### Distinguishing fail-open from real policy evaluation
+
+In `failMode: 'open'`, an `APPROVED` result sets `failOpen: true` when it came from the fallback path. Real policy evaluations leave `failOpen` unset. Hosts that need to distinguish the two in telemetry should branch on `result.failOpen`.
+
+### Behavior change from v0.1.0
+
+In v0.1.0, a `5xx` response with a valid-but-empty JSON body surfaced as `DENIED` + `SIGIL_POLICY_VIOLATION` (misleading — it was a server failure, not a policy decision). In v0.2.0, `5xx` routes through the same unreachability path as network errors: `APPROVED + failOpen: true` in open mode, `DENIED + SIGIL_UNREACHABLE` in closed.
 
 ## Documentation
 
