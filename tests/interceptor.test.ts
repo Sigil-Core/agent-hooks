@@ -107,6 +107,7 @@ describe('checkIntent', () => {
 
     expect(result.decision).toBe('APPROVED');
     expect(result.message).toBe('Sigil unreachable — fail open');
+    expect(result.failOpen).toBe(true);
     expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
     expect(warnSpy).toHaveBeenCalled();
 
@@ -129,6 +130,7 @@ describe('checkIntent', () => {
 
     expect(result.decision).toBe('APPROVED');
     expect(result.message).toBe('Sigil unreachable — fail open');
+    expect(result.failOpen).toBe(true);
     expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
     expect(warnSpy).toHaveBeenCalled();
 
