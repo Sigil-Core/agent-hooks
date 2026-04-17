@@ -66,7 +66,28 @@ const safeTool = wrapLangChainTool(myTool, config);
 // safeTool.call() now checks Sigil policy before executing
 ```
 
+### OpenClaw / NemoClaw
+
+`@sigilcore/agent-hooks` ships a native plugin hook handler for OpenClaw's `before_tool_call` API. NemoClaw uses the same hook, so one adapter covers both.
+
+```typescript
+import { createOpenclawSigilHandler } from '@sigilcore/agent-hooks';
+
+const sigilHandler = createOpenclawSigilHandler({
+  apiKey: process.env.SIGIL_API_KEY!,
+  agentId: 'my-openclaw-agent',
+  failMode: 'closed', // recommended for production
+});
+
+// In your OpenClaw plugin manifest:
+plugin.api.on('before_tool_call', sigilHandler);
+```
+
+Sigil `DENIED` decisions (including `SIGIL_UNREACHABLE` in closed mode) surface as OpenClaw tool blocks with the rejection reason. Sigil `PENDING` decisions surface through OpenClaw's native approval UI — no custom handling required.
+
 ## Works With AgentPay (WLFI)
+
+> **For `wallet.*` actions, always set `failMode: 'closed'`.** A fail-open authorization layer in front of on-chain value transfer is strictly worse than no policy layer at all — it claims enforcement it cannot deliver, so operators relax downstream controls trusting Sigil.
 
 [AgentPay SDK](https://github.com/World-Liberty-Financial-X) enables AI agents to hold and spend USD1 on EVM chains. `@sigilcore/agent-hooks` is fully compatible — no additional configuration needed.
 
@@ -76,13 +97,19 @@ When an AgentPay agent executes a USD1 transfer on Ethereum (chainId 1) or BNB S
 import { checkIntent } from '@sigilcore/agent-hooks';
 
 // AgentPay initiates a USD1 transfer — Sigil evaluates policy first
-const result = await checkIntent({
-  action: 'wallet.transfer',
-  chainId: 1,                          // Ethereum mainnet
-  to: '0xRecipientAddress',
-  amount: '1000000000000000000',       // 1 USD1 in wei
-  txCommit: sha256(rawTx),
-}, config);
+const result = await checkIntent(
+  {
+    action: 'wallet.transfer',
+    chainId: 1,                          // Ethereum mainnet
+    to: '0xRecipientAddress',
+    amount: '1000000000000000000',       // 1 USD1 in wei
+    txCommit: sha256(rawTx),
+  },
+  {
+    ...config,
+    failMode: 'closed',                  // required for wallet.* actions
+  },
+);
 
 if (result.decision !== 'APPROVED') {
   // Block the AgentPay transfer — policy not satisfied
@@ -94,6 +121,41 @@ if (result.decision !== 'APPROVED') {
 **The layers are additive:** AgentPay handles payment mechanics and key management. Sigil determines whether the agent is authorized to initiate the payment at all. AgentPay tells agents how to spend. Sigil tells agents what they're allowed to do.
 
 USD1 contract address: `0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d` (Ethereum + BSC)
+
+## Works With IronClaw
+
+[IronClaw](https://github.com/nearai/ironclaw) is a Rust agent orchestration framework. The TypeScript package does not embed directly in a Rust process; integrate from the dispatch host (the TypeScript service that submits jobs to IronClaw over HTTP or MCP):
+
+```typescript
+import { checkIntent, buildRejectionContext } from '@sigilcore/agent-hooks';
+
+// Before submitting a tool call to IronClaw's HTTP / MCP interface:
+const result = await checkIntent(
+  { action: 'bash', command: toolCall.args.command, agentId: 'ironclaw-agent' },
+  { apiKey: process.env.SIGIL_API_KEY!, framework: 'ironclaw', failMode: 'closed' },
+);
+if (result.decision !== 'APPROVED') {
+  // Do not dispatch; feed the rejection back to the upstream caller.
+  return buildRejectionContext(result, 'bash');
+}
+// Proceed with IronClaw dispatch.
+```
+
+Native in-process integration (implementing IronClaw's `Hook` trait) is scheduled for a separate Rust crate, `@sigilcore/agent-hooks-rs`.
+
+## Supported Frameworks
+
+| Framework | Adapter | Language | Integration |
+|---|---|---|---|
+| Claude Code / Anthropic SDK | `checkAnthropicToolUse` | TS | Adapter |
+| ELIZA | `checkElizaAction` | TS | Adapter |
+| LangChain | `wrapLangChainTool` | TS | Adapter |
+| OpenClaw | `createOpenclawSigilHandler` | TS | Adapter |
+| NVIDIA NemoClaw | `createOpenclawSigilHandler` | TS | Adapter (via OpenClaw) |
+| IronClaw (nearai) | — | Rust | Documentation (crate forthcoming) |
+| AgentPay (WLFI) | — | TS | Documentation |
+
+The typed registry lives at [`src/framework-registry.ts`](./src/framework-registry.ts) and is exported as `FRAMEWORKS`.
 
 ## Graceful Agent Degradation
 
