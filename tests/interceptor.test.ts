@@ -176,6 +176,26 @@ describe('checkIntent', () => {
     expect(result.policyHash).toBe('policy_hash_pending');
   });
 
+  it('accepts camelCase and snake_case response aliases', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'DENIED',
+          errorCode: 'SIGIL_CAMEL_CASE',
+          policy_hash: 'policy_hash_alias',
+          message: 'alias form',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await checkIntent({ action: 'bash' }, BASE_CONFIG);
+
+    expect(result.decision).toBe('DENIED');
+    expect(result.errorCode).toBe('SIGIL_CAMEL_CASE');
+    expect(result.policyHash).toBe('policy_hash_alias');
+  });
+
   it('sends correct request shape to /v1/authorize', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ status: 'APPROVED' }), {

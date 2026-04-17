@@ -5,7 +5,7 @@ export function buildAuthorizeRequestBody(
   intent: SigilIntent,
   config: SigilHookConfig,
 ): Record<string, unknown> {
-  const agentId = config.agentId ?? intent.agentId ?? 'agent';
+  const agentId = intent.agentId ?? config.agentId ?? 'agent';
   const txCommit = intent.txCommit ?? generateIntentCommit(intent);
 
   return {
@@ -25,6 +25,13 @@ export function buildAuthorizeRequestBody(
   };
 }
 
+export function serializeAuthorizeRequestBody(
+  intent: SigilIntent,
+  config: SigilHookConfig,
+): string {
+  return `${JSON.stringify(buildAuthorizeRequestBody(intent, config), null, 2)}\n`;
+}
+
 function generateIntentCommit(intent: SigilIntent): string {
   const preimage = JSON.stringify({
     action: intent.action,
@@ -37,4 +44,3 @@ function generateIntentCommit(intent: SigilIntent): string {
   });
   return createHash('sha256').update(preimage).digest('hex');
 }
-
