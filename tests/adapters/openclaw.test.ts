@@ -1,6 +1,7 @@
 // tests/adapters/openclaw.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createOpenclawSigilHandler } from '../../src/adapters/openclaw.js';
+import * as pkg from '../../src/index.js';
 import type { SigilHookConfig } from '../../src/types.js';
 import type {
   OpenclawBeforeToolCallEvent,
@@ -237,5 +238,9 @@ describe('createOpenclawSigilHandler', () => {
       toolCallId: 'ctx_call',
       originalToolName: 'custom_tool',
     });
+  });
+
+  it('is re-exported from the package index', () => {
+    expect(pkg.createOpenclawSigilHandler).toBe(createOpenclawSigilHandler);
   });
 });
