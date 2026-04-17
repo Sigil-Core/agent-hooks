@@ -10,3 +10,7 @@ AGENTS.md
 agents-global.md
 _MANIFEST.md
 .DS_Store
+
+# Internal-only agent context — not for public repos
+AGENTS.md
+SERVICE.md
