@@ -6,6 +6,7 @@ export { checkAnthropicToolUse } from './adapters/claude.js';
 export { checkElizaAction } from './adapters/eliza.js';
 export { wrapLangChainTool } from './adapters/langchain.js';
 export { createOpenclawSigilHandler } from './adapters/openclaw.js';
+export { FRAMEWORKS } from './framework-registry.js';
 export { SIGIL_UNREACHABLE } from './types.js';
 export type {
   SigilDecision,
@@ -21,3 +22,4 @@ export type {
   OpenclawToolContext,
   OpenclawBeforeToolCallResult,
 } from './adapters/openclaw.js';
+export type { FrameworkDescriptor } from './framework-registry.js';
