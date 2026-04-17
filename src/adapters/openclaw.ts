@@ -1,5 +1,6 @@
 // src/adapters/openclaw.ts
 import { checkIntent } from '../interceptor.js';
+import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig, SigilIntent } from '../types.js';
 
 export interface OpenclawBeforeToolCallEvent {
@@ -51,6 +52,14 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
     });
 
     if (result.decision === 'APPROVED') return undefined;
+
+    if (result.decision === 'DENIED') {
+      const rejection = buildRejectionContext(result, action);
+      return {
+        block: true,
+        blockReason: `${rejection.sigil_error_code}: ${rejection.sigil_message} — ${rejection.sigil_next_steps}`,
+      };
+    }
 
     return undefined;
   };
