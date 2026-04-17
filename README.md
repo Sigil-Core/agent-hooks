@@ -141,7 +141,7 @@ if (result.decision !== 'APPROVED') {
 // Proceed with IronClaw dispatch.
 ```
 
-Native in-process integration (implementing IronClaw's `Hook` trait) is scheduled for a separate Rust crate, `@sigilcore/agent-hooks-rs`.
+Native in-process integration (implementing IronClaw's `Hook` trait) ships as [`sigil-agent-hooks-ironclaw`](https://github.com/Sigil-Core/agent-hooks-rs) in the companion Rust repository.
 
 ## Supported Frameworks
 
@@ -152,7 +152,7 @@ Native in-process integration (implementing IronClaw's `Hook` trait) is schedule
 | LangChain | `wrapLangChainTool` | TS | Adapter |
 | OpenClaw | `createOpenclawSigilHandler` | TS | Adapter |
 | NVIDIA NemoClaw | `createOpenclawSigilHandler` | TS | Adapter (via OpenClaw) |
-| IronClaw (nearai) | — | Rust | Documentation (crate forthcoming) |
+| IronClaw (nearai) | [`sigil-agent-hooks-ironclaw`](https://github.com/Sigil-Core/agent-hooks-rs) | Rust | Adapter |
 | AgentPay (WLFI) | — | TS | Documentation |
 
 The typed registry lives at [`src/framework-registry.ts`](./src/framework-registry.ts) and is exported as `FRAMEWORKS`.
