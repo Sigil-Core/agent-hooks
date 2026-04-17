@@ -3,6 +3,19 @@ import { checkIntent } from '../interceptor.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig, SigilIntent } from '../types.js';
 
+const TOOL_ACTION_MAP: Record<string, string> = {
+  exec: 'bash',
+  process: 'bash',
+  code_execution: 'bash',
+  write: 'file_write',
+  edit: 'file_write',
+  apply_patch: 'file_write',
+  web_fetch: 'web_fetch',
+  web_search: 'web_fetch',
+  x_search: 'web_fetch',
+  browser: 'web_fetch',
+};
+
 export interface OpenclawBeforeToolCallEvent {
   toolName: string;
   params: Record<string, unknown>;
@@ -37,7 +50,7 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
     event: OpenclawBeforeToolCallEvent,
     ctx: OpenclawToolContext,
   ): Promise<OpenclawBeforeToolCallResult | undefined> => {
-    const action = event.toolName.toLowerCase();
+    const action = TOOL_ACTION_MAP[event.toolName] ?? event.toolName.toLowerCase();
     const intent: SigilIntent = {
       action,
       agentId: ctx.agentId ?? config.agentId,

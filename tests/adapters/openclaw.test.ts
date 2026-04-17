@@ -116,4 +116,88 @@ describe('createOpenclawSigilHandler', () => {
 
     warnSpy.mockRestore();
   });
+
+  it('maps exec/process/code_execution to bash', async () => {
+    for (const toolName of ['exec', 'process', 'code_execution']) {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'APPROVED' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const handler = createOpenclawSigilHandler(BASE_CONFIG);
+      const event: OpenclawBeforeToolCallEvent = { toolName, params: { command: 'ls' } };
+      await handler(event, { ...BASE_CTX, toolName });
+
+      const body = JSON.parse(
+        (vi.mocked(fetch).mock.calls.at(-1)![1] as RequestInit).body as string,
+      );
+      expect(body.intent.action).toBe('bash');
+    }
+  });
+
+  it('maps write/edit/apply_patch to file_write', async () => {
+    for (const toolName of ['write', 'edit', 'apply_patch']) {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'APPROVED' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const handler = createOpenclawSigilHandler(BASE_CONFIG);
+      const event: OpenclawBeforeToolCallEvent = { toolName, params: { path: '/tmp/x' } };
+      await handler(event, { ...BASE_CTX, toolName });
+
+      const body = JSON.parse(
+        (vi.mocked(fetch).mock.calls.at(-1)![1] as RequestInit).body as string,
+      );
+      expect(body.intent.action).toBe('file_write');
+    }
+  });
+
+  it('maps web_fetch/web_search/x_search/browser to web_fetch', async () => {
+    for (const toolName of ['web_fetch', 'web_search', 'x_search', 'browser']) {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'APPROVED' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const handler = createOpenclawSigilHandler(BASE_CONFIG);
+      const event: OpenclawBeforeToolCallEvent = {
+        toolName,
+        params: { url: 'https://example.com' },
+      };
+      await handler(event, { ...BASE_CTX, toolName });
+
+      const body = JSON.parse(
+        (vi.mocked(fetch).mock.calls.at(-1)![1] as RequestInit).body as string,
+      );
+      expect(body.intent.action).toBe('web_fetch');
+    }
+  });
+
+  it('passes unknown tool names through as lowercase', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'APPROVED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const handler = createOpenclawSigilHandler(BASE_CONFIG);
+    const event: OpenclawBeforeToolCallEvent = {
+      toolName: 'Sessions_List',
+      params: {},
+    };
+    await handler(event, { ...BASE_CTX, toolName: 'Sessions_List' });
+
+    const body = JSON.parse(
+      (vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.intent.action).toBe('sessions_list');
+  });
 });
