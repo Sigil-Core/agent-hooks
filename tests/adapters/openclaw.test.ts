@@ -200,4 +200,42 @@ describe('createOpenclawSigilHandler', () => {
     );
     expect(body.intent.action).toBe('sessions_list');
   });
+
+  it('propagates ctx fields and params into intent.metadata.openclaw', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'APPROVED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const handler = createOpenclawSigilHandler(BASE_CONFIG);
+    const event: OpenclawBeforeToolCallEvent = {
+      toolName: 'custom_tool',
+      params: { foo: 'bar', nested: { n: 1 } },
+      runId: 'evt_run',
+      toolCallId: 'evt_call',
+    };
+    const ctx: OpenclawToolContext = {
+      toolName: 'custom_tool',
+      sessionKey: 'session_k',
+      sessionId: 'session_s',
+      runId: 'ctx_run',
+      toolCallId: 'ctx_call',
+    };
+    await handler(event, ctx);
+
+    const body = JSON.parse(
+      (vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.intent.metadata.foo).toBe('bar');
+    expect(body.intent.metadata.nested).toEqual({ n: 1 });
+    expect(body.intent.metadata.openclaw).toEqual({
+      sessionKey: 'session_k',
+      sessionId: 'session_s',
+      runId: 'ctx_run',
+      toolCallId: 'ctx_call',
+      originalToolName: 'custom_tool',
+    });
+  });
 });

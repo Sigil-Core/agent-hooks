@@ -57,6 +57,16 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
       command: event.params['command'] as string | undefined,
       url: event.params['url'] as string | undefined,
       path: event.params['path'] as string | undefined,
+      metadata: {
+        ...event.params,
+        openclaw: {
+          sessionKey: ctx.sessionKey,
+          sessionId: ctx.sessionId,
+          runId: ctx.runId,
+          toolCallId: ctx.toolCallId,
+          originalToolName: event.toolName,
+        },
+      },
     };
 
     const result = await checkIntent(intent, {
