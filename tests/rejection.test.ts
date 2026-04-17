@@ -49,4 +49,31 @@ describe('buildRejectionContext', () => {
     expect(ctx.sigil_error_code).toBe('SIGIL_POLICY_VIOLATION');
     expect(ctx.sigil_message).toBe('Action blocked by Sigil policy.');
   });
+
+  it('returns transient-failure context for SIGIL_UNREACHABLE', () => {
+    const result: SigilHookResult = {
+      decision: 'DENIED',
+      errorCode: 'SIGIL_UNREACHABLE',
+      message: 'ECONNREFUSED',
+    };
+
+    const ctx = buildRejectionContext(result, 'bash');
+
+    expect(ctx.sigil_decision).toBe('DENIED');
+    expect(ctx.sigil_error_code).toBe('SIGIL_UNREACHABLE');
+    expect(ctx.sigil_message).toBe('ECONNREFUSED');
+    expect(ctx.sigil_action_taken).toBe('halted');
+    expect(ctx.sigil_next_steps).toContain('transient');
+    expect(ctx.sigil_next_steps).toContain('retry');
+    expect(ctx.sigil_next_steps).not.toContain('policy violation');
+  });
+
+  it('falls back to default message for SIGIL_UNREACHABLE without message', () => {
+    const result: SigilHookResult = {
+      decision: 'DENIED',
+      errorCode: 'SIGIL_UNREACHABLE',
+    };
+    const ctx = buildRejectionContext(result, 'bash');
+    expect(ctx.sigil_message).toBe('Sigil policy service unreachable.');
+  });
 });

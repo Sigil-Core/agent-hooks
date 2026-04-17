@@ -19,6 +19,20 @@ export function buildRejectionContext(
     };
   }
 
+  if (result.errorCode === 'SIGIL_UNREACHABLE') {
+    return {
+      sigil_decision: 'DENIED',
+      sigil_error_code: 'SIGIL_UNREACHABLE',
+      sigil_message: result.message ?? 'Sigil policy service unreachable.',
+      sigil_policy_hash: result.policyHash,
+      sigil_action_taken: 'halted',
+      sigil_next_steps:
+        'Sigil is temporarily unreachable — transient infrastructure failure, not a policy decision. ' +
+        'Pause and retry this action when connectivity to Sigil is restored. ' +
+        'No policy was violated; do not file an operator report.',
+    };
+  }
+
   return {
     sigil_decision: 'DENIED',
     sigil_error_code: result.errorCode ?? 'SIGIL_POLICY_VIOLATION',

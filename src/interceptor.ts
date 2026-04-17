@@ -1,6 +1,7 @@
 // src/interceptor.ts
 import { createHash } from 'node:crypto';
 import type { SigilHookConfig, SigilHookResult, SigilIntent } from './types.js';
+import { SIGIL_UNREACHABLE } from './types.js';
 
 const DEFAULT_API_URL = 'https://sign.sigilcore.com';
 
@@ -28,6 +29,10 @@ export async function checkIntent(
     },
   };
 
+  const timeoutMs = config.requestTimeoutMs ?? 10_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   let data: Record<string, unknown>;
   try {
     const response = await fetch(`${apiUrl}/v1/authorize`, {
@@ -37,21 +42,32 @@ export async function checkIntent(
         'Authorization': `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
     if (response.status === 401 || response.status === 403) {
       return { decision: 'DENIED', errorCode: 'SIGIL_AUTH_FAILURE', message: `Authentication failed (${response.status})` };
+    }
+    if (response.status >= 500) {
+      throw new Error(`sigil_server_${response.status}`);
     }
     data = await response.json() as Record<string, unknown>;
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
     config.onError?.(intent, error);
+    const failMode = config.failMode ?? 'open';
     console.warn(JSON.stringify({
-      level: 'warn',
-      event: 'sigil_hook_network_error',
+      level: failMode === 'closed' ? 'error' : 'warn',
+      event: 'sigil_hook_unreachable',
       action: intent.action,
+      failMode,
       message: error.message,
     }));
-    return { decision: 'APPROVED', message: 'Sigil unreachable — fail open' };
+    if (failMode === 'closed') {
+      return { decision: 'DENIED', errorCode: SIGIL_UNREACHABLE, message: error.message };
+    }
+    return { decision: 'APPROVED', failOpen: true, message: 'Sigil unreachable — fail open' };
+  } finally {
+    clearTimeout(timer);
   }
 
   if (data['status'] === 'APPROVED') {
