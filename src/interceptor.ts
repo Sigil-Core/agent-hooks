@@ -1,6 +1,7 @@
 // src/interceptor.ts
 import { createHash } from 'node:crypto';
 import type { SigilHookConfig, SigilHookResult, SigilIntent } from './types.js';
+import { SIGIL_UNREACHABLE } from './types.js';
 
 const DEFAULT_API_URL = 'https://sign.sigilcore.com';
 
@@ -45,13 +46,18 @@ export async function checkIntent(
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
     config.onError?.(intent, error);
+    const failMode = config.failMode ?? 'open';
     console.warn(JSON.stringify({
-      level: 'warn',
-      event: 'sigil_hook_network_error',
+      level: failMode === 'closed' ? 'error' : 'warn',
+      event: 'sigil_hook_unreachable',
       action: intent.action,
+      failMode,
       message: error.message,
     }));
-    return { decision: 'APPROVED', message: 'Sigil unreachable — fail open' };
+    if (failMode === 'closed') {
+      return { decision: 'DENIED', errorCode: SIGIL_UNREACHABLE, message: error.message };
+    }
+    return { decision: 'APPROVED', failOpen: true, message: 'Sigil unreachable — fail open' };
   }
 
   if (data['status'] === 'APPROVED') {

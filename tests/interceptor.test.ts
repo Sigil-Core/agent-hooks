@@ -225,4 +225,24 @@ describe('checkIntent', () => {
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
     expect(body.framework).toBe('openclaw');
   });
+
+  describe('failMode: closed', () => {
+    it('returns DENIED + SIGIL_UNREACHABLE when fetch throws', async () => {
+      vi.mocked(fetch).mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+      const onError = vi.fn();
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = { ...BASE_CONFIG, failMode: 'closed' as const, onError };
+      const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+      const result = await checkIntent(intent, config);
+
+      expect(result.decision).toBe('DENIED');
+      expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+      expect(result.message).toBe('ECONNREFUSED');
+      expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
+      expect(warnSpy).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
+  });
 });
