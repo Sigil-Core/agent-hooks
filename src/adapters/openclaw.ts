@@ -62,8 +62,8 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
         openclaw: {
           sessionKey: ctx.sessionKey,
           sessionId: ctx.sessionId,
-          runId: ctx.runId,
-          toolCallId: ctx.toolCallId,
+          runId: ctx.runId ?? event.runId,
+          toolCallId: ctx.toolCallId ?? event.toolCallId,
           originalToolName: event.toolName,
         },
       },
@@ -76,20 +76,18 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
 
     if (result.decision === 'APPROVED') return undefined;
 
-    if (result.decision === 'PENDING') {
-      return {
-        requireApproval: {
-          title: `Sigil approval required: ${action}`,
-          description: result.message ?? 'Action requires human approval via Sigil.',
-          severity: 'warning',
-        },
-      };
-    }
-
+    // DENIED and PENDING both become blocks. PENDING is not downgraded to
+    // OpenClaw's local requireApproval UI: that would let a host user approve
+    // the call without resolving the Sigil hold, bypassing enforcement. The
+    // hold_id is surfaced in blockReason so operators can resolve it out of
+    // band via Sigil Command.
     const rejection = buildRejectionContext(result, action);
+    const holdSuffix = rejection.sigil_hold_id
+      ? ` (hold_id: ${rejection.sigil_hold_id})`
+      : '';
     return {
       block: true,
-      blockReason: `${rejection.sigil_error_code}: ${rejection.sigil_message} — ${rejection.sigil_next_steps}`,
+      blockReason: `${rejection.sigil_error_code}: ${rejection.sigil_message} — ${rejection.sigil_next_steps}${holdSuffix}`,
     };
   };
 }

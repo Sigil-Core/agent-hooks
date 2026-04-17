@@ -83,7 +83,7 @@ const sigilHandler = createOpenclawSigilHandler({
 plugin.api.on('before_tool_call', sigilHandler);
 ```
 
-Sigil `DENIED` decisions (including `SIGIL_UNREACHABLE` in closed mode) surface as OpenClaw tool blocks with the rejection reason. Sigil `PENDING` decisions surface through OpenClaw's native approval UI — no custom handling required.
+Sigil `DENIED` decisions (including `SIGIL_UNREACHABLE` in closed mode) surface as OpenClaw tool blocks with the rejection reason. Sigil `PENDING` decisions also surface as blocks — with `SIGIL_CONSENSUS_HOLD_REQUIRED` and the `hold_id` included in `blockReason` — so a hold can only be resolved out of band through Sigil Command. The adapter deliberately does **not** surface `PENDING` through OpenClaw's local approval UI, because local approval would let a host user run the tool without the Sigil hold ever being resolved, bypassing enforcement.
 
 ## Works With AgentPay (WLFI)
 

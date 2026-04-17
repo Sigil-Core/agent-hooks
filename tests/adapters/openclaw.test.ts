@@ -72,7 +72,7 @@ describe('createOpenclawSigilHandler', () => {
     expect(result!.blockReason).toContain('rm -rf is not allowed');
   });
 
-  it('returns requireApproval on PENDING', async () => {
+  it('returns block:true with hold_id on PENDING (no local approval bypass)', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -92,11 +92,12 @@ describe('createOpenclawSigilHandler', () => {
     const result = await handler(event, BASE_CTX);
 
     expect(result).toBeDefined();
-    expect(result!.requireApproval).toBeDefined();
-    expect(result!.requireApproval!.title).toContain('email_send');
-    expect(result!.requireApproval!.description).toContain('human approval');
-    expect(result!.requireApproval!.severity).toBe('warning');
-    expect(result!.block).toBeUndefined();
+    expect(result!.block).toBe(true);
+    expect(result!.blockReason).toContain('SIGIL_CONSENSUS_HOLD_REQUIRED');
+    expect(result!.blockReason).toContain('Email requires human approval');
+    expect(result!.blockReason).toContain('hold_id: hold_abc');
+    expect(result!.blockReason).toContain('Do not retry');
+    expect(result!.requireApproval).toBeUndefined();
   });
 
   it('returns block:true with transient guidance on DENIED + SIGIL_UNREACHABLE', async () => {
@@ -238,6 +239,63 @@ describe('createOpenclawSigilHandler', () => {
       toolCallId: 'ctx_call',
       originalToolName: 'custom_tool',
     });
+  });
+
+  it('falls back to event.runId and event.toolCallId when ctx omits them', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'APPROVED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const handler = createOpenclawSigilHandler(BASE_CONFIG);
+    const event: OpenclawBeforeToolCallEvent = {
+      toolName: 'exec',
+      params: { command: 'ls' },
+      runId: 'evt_run',
+      toolCallId: 'evt_call',
+    };
+    const ctx: OpenclawToolContext = {
+      toolName: 'exec',
+      sessionKey: 'session_k',
+    };
+    await handler(event, ctx);
+
+    const body = JSON.parse(
+      (vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.intent.metadata.openclaw.runId).toBe('evt_run');
+    expect(body.intent.metadata.openclaw.toolCallId).toBe('evt_call');
+  });
+
+  it('prefers ctx.runId and ctx.toolCallId over event values when both are set', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'APPROVED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const handler = createOpenclawSigilHandler(BASE_CONFIG);
+    const event: OpenclawBeforeToolCallEvent = {
+      toolName: 'exec',
+      params: { command: 'ls' },
+      runId: 'evt_run',
+      toolCallId: 'evt_call',
+    };
+    const ctx: OpenclawToolContext = {
+      toolName: 'exec',
+      runId: 'ctx_run',
+      toolCallId: 'ctx_call',
+    };
+    await handler(event, ctx);
+
+    const body = JSON.parse(
+      (vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.intent.metadata.openclaw.runId).toBe('ctx_run');
+    expect(body.intent.metadata.openclaw.toolCallId).toBe('ctx_call');
   });
 
   it('is re-exported from the package index', () => {
