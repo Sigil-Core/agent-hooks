@@ -42,6 +42,9 @@ export async function checkIntent(
     if (response.status === 401 || response.status === 403) {
       return { decision: 'DENIED', errorCode: 'SIGIL_AUTH_FAILURE', message: `Authentication failed (${response.status})` };
     }
+    if (response.status >= 500) {
+      throw new Error(`sigil_server_${response.status}`);
+    }
     data = await response.json() as Record<string, unknown>;
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
