@@ -53,14 +53,20 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
 
     if (result.decision === 'APPROVED') return undefined;
 
-    if (result.decision === 'DENIED') {
-      const rejection = buildRejectionContext(result, action);
+    if (result.decision === 'PENDING') {
       return {
-        block: true,
-        blockReason: `${rejection.sigil_error_code}: ${rejection.sigil_message} — ${rejection.sigil_next_steps}`,
+        requireApproval: {
+          title: `Sigil approval required: ${action}`,
+          description: result.message ?? 'Action requires human approval via Sigil.',
+          severity: 'warning',
+        },
       };
     }
 
-    return undefined;
+    const rejection = buildRejectionContext(result, action);
+    return {
+      block: true,
+      blockReason: `${rejection.sigil_error_code}: ${rejection.sigil_message} — ${rejection.sigil_next_steps}`,
+    };
   };
 }

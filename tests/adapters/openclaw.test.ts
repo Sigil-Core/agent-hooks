@@ -71,6 +71,33 @@ describe('createOpenclawSigilHandler', () => {
     expect(result!.blockReason).toContain('rm -rf is not allowed');
   });
 
+  it('returns requireApproval on PENDING', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'PENDING',
+          holdId: 'hold_abc',
+          message: 'Email requires human approval',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const handler = createOpenclawSigilHandler(BASE_CONFIG);
+    const event: OpenclawBeforeToolCallEvent = {
+      toolName: 'email_send',
+      params: { to: 'ceo@example.com' },
+    };
+    const result = await handler(event, BASE_CTX);
+
+    expect(result).toBeDefined();
+    expect(result!.requireApproval).toBeDefined();
+    expect(result!.requireApproval!.title).toContain('email_send');
+    expect(result!.requireApproval!.description).toContain('human approval');
+    expect(result!.requireApproval!.severity).toBe('warning');
+    expect(result!.block).toBeUndefined();
+  });
+
   it('returns block:true with transient guidance on DENIED + SIGIL_UNREACHABLE', async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
