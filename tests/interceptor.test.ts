@@ -321,5 +321,56 @@ describe('checkIntent', () => {
 
       warnSpy.mockRestore();
     });
+
+    it('returns DENIED + SIGIL_UNREACHABLE when fetch times out (closed mode)', async () => {
+      vi.mocked(fetch).mockImplementationOnce(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            const signal = (init as RequestInit | undefined)?.signal;
+            if (signal) {
+              signal.addEventListener('abort', () => {
+                const err = new Error('The operation was aborted.');
+                err.name = 'AbortError';
+                reject(err);
+              });
+            }
+          }),
+      );
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = { ...BASE_CONFIG, failMode: 'closed' as const, requestTimeoutMs: 10 };
+      const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+      const result = await checkIntent(intent, config);
+
+      expect(result.decision).toBe('DENIED');
+      expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+
+      warnSpy.mockRestore();
+    });
+  });
+
+  it('returns APPROVED + failOpen:true when fetch times out (open mode)', async () => {
+    vi.mocked(fetch).mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = (init as RequestInit | undefined)?.signal;
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted.');
+              err.name = 'AbortError';
+              reject(err);
+            });
+          }
+        }),
+    );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+    const result = await checkIntent(intent, { ...BASE_CONFIG, requestTimeoutMs: 10 });
+
+    expect(result.decision).toBe('APPROVED');
+    expect(result.failOpen).toBe(true);
+
+    warnSpy.mockRestore();
   });
 });

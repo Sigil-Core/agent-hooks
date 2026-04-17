@@ -29,6 +29,10 @@ export async function checkIntent(
     },
   };
 
+  const timeoutMs = config.requestTimeoutMs ?? 10_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   let data: Record<string, unknown>;
   try {
     const response = await fetch(`${apiUrl}/v1/authorize`, {
@@ -38,6 +42,7 @@ export async function checkIntent(
         'Authorization': `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
     if (response.status === 401 || response.status === 403) {
       return { decision: 'DENIED', errorCode: 'SIGIL_AUTH_FAILURE', message: `Authentication failed (${response.status})` };
@@ -61,6 +66,8 @@ export async function checkIntent(
       return { decision: 'DENIED', errorCode: SIGIL_UNREACHABLE, message: error.message };
     }
     return { decision: 'APPROVED', failOpen: true, message: 'Sigil unreachable — fail open' };
+  } finally {
+    clearTimeout(timer);
   }
 
   if (data['status'] === 'APPROVED') {
