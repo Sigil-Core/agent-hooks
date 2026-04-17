@@ -1,5 +1,5 @@
 // src/interceptor.ts
-import { buildAuthorizeRequestBody } from './request.js';
+import { serializeAuthorizeRequestBody } from './request.js';
 import type { SigilHookConfig, SigilHookResult, SigilIntent } from './types.js';
 import { SIGIL_UNREACHABLE } from './types.js';
 
@@ -10,7 +10,7 @@ export async function checkIntent(
   config: SigilHookConfig,
 ): Promise<SigilHookResult> {
   const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
-  const body = buildAuthorizeRequestBody(intent, config);
+  const body = serializeAuthorizeRequestBody(intent, config);
 
   const timeoutMs = config.requestTimeoutMs ?? 10_000;
   const controller = new AbortController();
@@ -24,7 +24,7 @@ export async function checkIntent(
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify(body),
+      body,
       signal: controller.signal,
     });
     if (response.status === 401 || response.status === 403) {
@@ -56,14 +56,17 @@ export async function checkIntent(
   if (data['status'] === 'APPROVED') {
     return {
       decision: 'APPROVED',
-      policyHash: data['policyHash'] as string | undefined,
+      policyHash: (data['policyHash'] as string | undefined)
+        ?? (data['policy_hash'] as string | undefined),
     };
   }
 
-  const policyHash = data['policyHash'] as string | undefined;
+  const policyHash = (data['policyHash'] as string | undefined)
+    ?? (data['policy_hash'] as string | undefined);
 
   if (data['status'] === 'PENDING') {
-    const holdId = data['holdId'] as string;
+    const holdId = ((data['holdId'] as string | undefined)
+      ?? (data['hold_id'] as string | undefined)) as string;
     config.onPending?.(intent, holdId);
     return {
       decision: 'PENDING',
@@ -73,7 +76,9 @@ export async function checkIntent(
     };
   }
 
-  const errorCode = (data['error_code'] as string) ?? 'SIGIL_POLICY_VIOLATION';
+  const errorCode = ((data['error_code'] as string | undefined)
+    ?? (data['errorCode'] as string | undefined)
+    ?? 'SIGIL_POLICY_VIOLATION');
   const message = (data['message'] as string) ?? 'Action blocked by policy';
   config.onDenied?.(intent, message);
   return { decision: 'DENIED', errorCode, message, policyHash };
