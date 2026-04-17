@@ -186,6 +186,18 @@ For held actions:
 }
 ```
 
+For transient unreachability (only surfaces when `failMode: 'closed'`):
+
+```json
+{
+  "sigil_decision": "DENIED",
+  "sigil_error_code": "SIGIL_UNREACHABLE",
+  "sigil_message": "ECONNREFUSED",
+  "sigil_action_taken": "halted",
+  "sigil_next_steps": "Sigil is temporarily unreachable — transient infrastructure failure, not a policy decision. Pause and retry this action when connectivity to Sigil is restored. No policy was violated; do not file an operator report."
+}
+```
+
 ## Configuration
 
 | Field | Type | Required | Default | Description |
