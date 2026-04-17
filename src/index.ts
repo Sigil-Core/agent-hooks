@@ -1,6 +1,7 @@
 // src/index.ts
 
 export { checkIntent } from './interceptor.js';
+export { buildAuthorizeRequestBody, serializeAuthorizeRequestBody } from './request.js';
 export { buildRejectionContext } from './rejection.js';
 export { checkAnthropicToolUse } from './adapters/claude.js';
 export { checkElizaAction } from './adapters/eliza.js';

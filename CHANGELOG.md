@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-04-17
+
+### Fixed
+
+- Cross-language `/v1/authorize` wire parity is now enforced at the actual HTTP boundary, not just at helper serialization boundaries. TypeScript and Rust now send the same pretty-printed request body with a trailing newline.
+- `agentId` precedence is aligned across implementations: per-intent `agentId` now overrides config-level `agentId` in both clients.
+- Auto-generated `txCommit` hashing now omits absent optional fields instead of hashing `null` placeholders, matching the TypeScript serializer and preventing cross-language digest drift.
+- TypeScript now accepts both snake_case and camelCase response fields for `errorCode`/`error_code`, `holdId`/`hold_id`, and `policyHash`/`policy_hash`.
+
+### Added
+
+- Raw-wire fixture regression tests for `bash`, `web_fetch`, `wallet.transfer`, and `intent_agent_override` request bodies.
+- Deterministic `txCommit` parity coverage for the auto-generated commit path.
+- `tests/UPSTREAM_AGENT_HOOKS_RS_COMMIT` now pins the exact `agent-hooks-rs` commit used to generate vendored fixtures, and fixture-parity tests enforce that the pin is a real 40-character SHA.
+- CI workflow for source-level verification (`typecheck`, `lint`, `test`, `build`) on push and pull request.
+
 ## [0.2.0] — 2026-04-17
 
 ### Added
