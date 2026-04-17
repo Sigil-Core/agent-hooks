@@ -265,6 +265,25 @@ describe('checkIntent', () => {
       warnSpy.mockRestore();
     });
 
+    it('logs sigil_hook_unreachable at error level in closed mode', async () => {
+      vi.mocked(fetch).mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = { ...BASE_CONFIG, failMode: 'closed' as const };
+      const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+      await checkIntent(intent, config);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(warnSpy.mock.calls[0][0] as string);
+      expect(payload.event).toBe('sigil_hook_unreachable');
+      expect(payload.level).toBe('error');
+      expect(payload.failMode).toBe('closed');
+      expect(payload.action).toBe('bash');
+      expect(payload.message).toBe('ECONNREFUSED');
+
+      warnSpy.mockRestore();
+    });
+
     it('returns DENIED + SIGIL_UNREACHABLE on 500 response in closed mode', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
         new Response(JSON.stringify({ status: 'APPROVED' }), {
@@ -370,6 +389,22 @@ describe('checkIntent', () => {
 
     expect(result.decision).toBe('APPROVED');
     expect(result.failOpen).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  it('logs sigil_hook_unreachable at warn level in open mode (default)', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
+    await checkIntent(intent, BASE_CONFIG);
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    expect(payload.event).toBe('sigil_hook_unreachable');
+    expect(payload.level).toBe('warn');
+    expect(payload.failMode).toBe('open');
 
     warnSpy.mockRestore();
   });
