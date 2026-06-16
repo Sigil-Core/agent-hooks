@@ -12,6 +12,9 @@
       "require": "./dist/index.cjs"
     }
   },
+  "publishConfig": {
+    "provenance": true
+  },
   "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsup",
