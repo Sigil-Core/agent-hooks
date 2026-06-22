@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-06-22
+
+### Added
+
+- Execution-limit support: exported `SIGIL_LOOP_LIMIT_EXCEEDED` and `SIGIL_LIMIT_STORE_UNAVAILABLE` constants, plus optional `taskId` fields on `SigilIntent`, `SigilHookConfig`, and `SigilHookResult`.
+- Rejection contexts now include optional `sigil_task_id` when a denial is tied to a per-task execution ceiling.
+
 ## [0.2.1] — 2026-04-17
 
 ### Fixed

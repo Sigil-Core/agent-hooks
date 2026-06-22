@@ -119,6 +119,32 @@ describe('createOpenclawSigilHandler', () => {
     warnSpy.mockRestore();
   });
 
+  it('returns block:true with hard-stop guidance on SIGIL_LOOP_LIMIT_EXCEEDED', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'DENIED',
+          error_code: 'SIGIL_LOOP_LIMIT_EXCEEDED',
+          message: 'Tool call count 51 exceeded per-task ceiling 50.',
+        }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const handler = createOpenclawSigilHandler({ ...BASE_CONFIG, taskId: 'openclaw-run-1' });
+    const event: OpenclawBeforeToolCallEvent = {
+      toolName: 'exec',
+      params: { command: 'npm test' },
+    };
+    const result = await handler(event, BASE_CTX);
+
+    expect(result).toBeDefined();
+    expect(result!.block).toBe(true);
+    expect(result!.blockReason).toContain('SIGIL_LOOP_LIMIT_EXCEEDED');
+    expect(result!.blockReason).toContain('Hard-stop');
+    expect(result!.blockReason).toContain('openclaw-run-1');
+  });
+
   it('maps exec/process/code_execution to bash', async () => {
     for (const toolName of ['exec', 'process', 'code_execution']) {
       vi.mocked(fetch).mockResolvedValueOnce(
@@ -239,6 +265,7 @@ describe('createOpenclawSigilHandler', () => {
       toolCallId: 'ctx_call',
       originalToolName: 'custom_tool',
     });
+    expect(typeof body.intent.task_id).toBe('string');
   });
 
   it('falls back to event.runId and event.toolCallId when ctx omits them', async () => {

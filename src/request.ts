@@ -1,5 +1,19 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { SigilHookConfig, SigilIntent } from './types.js';
+
+const DEFAULT_TASK_ID = randomUUID();
+
+/**
+ * Resolves the task identifier for execution-limit tracking.
+ * Precedence is intent.taskId, then config.taskId, then a process-scoped default.
+ *
+ * @param intent - The authorization intent.
+ * @param config - The hook configuration.
+ * @returns The resolved task identifier.
+ */
+export function resolveTaskId(intent: SigilIntent, config: SigilHookConfig): string {
+  return intent.taskId ?? config.taskId ?? DEFAULT_TASK_ID;
+}
 
 export function buildAuthorizeRequestBody(
   intent: SigilIntent,
@@ -7,6 +21,7 @@ export function buildAuthorizeRequestBody(
 ): Record<string, unknown> {
   const agentId = intent.agentId ?? config.agentId ?? 'agent';
   const txCommit = intent.txCommit ?? generateIntentCommit(intent);
+  const taskId = resolveTaskId(intent, config);
 
   return {
     framework: config.framework ?? 'agent-hooks',
@@ -20,6 +35,7 @@ export function buildAuthorizeRequestBody(
       path: intent.path,
       targetAddress: intent.to,
       amount: intent.amount,
+      task_id: taskId,
       metadata: intent.metadata,
     },
   };
