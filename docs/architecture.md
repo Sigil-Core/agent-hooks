@@ -37,5 +37,4 @@ token. The trust chain is:
    provenance.
 
 The `repository.url` in `package.json` is part of that trust boundary and must
-remain `https://github.com/Sigil-Core/agent-hooks.git`.
-
+remain `git+https://github.com/Sigil-Core/agent-hooks.git`.
