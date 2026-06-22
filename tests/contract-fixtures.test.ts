@@ -16,6 +16,7 @@ const UPSTREAM_PIN_PATH = resolve(
 const BASE_CONFIG: SigilHookConfig = {
   apiKey: 'sk_sigil_test_key',
   agentId: 'fixture-agent',
+  taskId: 'fixture-task-1',
 };
 
 function readFixture(name: string): string {

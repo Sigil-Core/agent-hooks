@@ -1,7 +1,11 @@
 // src/interceptor.ts
-import { serializeAuthorizeRequestBody } from './request.js';
+import { resolveTaskId, serializeAuthorizeRequestBody } from './request.js';
 import type { SigilHookConfig, SigilHookResult, SigilIntent } from './types.js';
-import { SIGIL_UNREACHABLE } from './types.js';
+import {
+  SIGIL_LIMIT_STORE_UNAVAILABLE,
+  SIGIL_LOOP_LIMIT_EXCEEDED,
+  SIGIL_UNREACHABLE,
+} from './types.js';
 
 const DEFAULT_API_URL = 'https://sign.sigilcore.com';
 
@@ -11,6 +15,7 @@ export async function checkIntent(
 ): Promise<SigilHookResult> {
   const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
   const body = serializeAuthorizeRequestBody(intent, config);
+  const taskId = resolveTaskId(intent, config);
 
   const timeoutMs = config.requestTimeoutMs ?? 10_000;
   const controller = new AbortController();
@@ -27,7 +32,7 @@ export async function checkIntent(
       body,
       signal: controller.signal,
     });
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       return { decision: 'DENIED', errorCode: 'SIGIL_AUTH_FAILURE', message: `Authentication failed (${response.status})` };
     }
     if (response.status >= 500) {
@@ -79,7 +84,12 @@ export async function checkIntent(
   const errorCode = ((data['error_code'] as string | undefined)
     ?? (data['errorCode'] as string | undefined)
     ?? 'SIGIL_POLICY_VIOLATION');
-  const message = (data['message'] as string) ?? 'Action blocked by policy';
+  let message = (data['message'] as string) ?? 'Action blocked by policy';
+  if (errorCode === SIGIL_LOOP_LIMIT_EXCEEDED) {
+    message = `${message} Hard-stop this agent run for task_id ${taskId}.`;
+  } else if (errorCode === SIGIL_LIMIT_STORE_UNAVAILABLE) {
+    message = `${message} Sigil could not verify loop budget, so enforcement failed closed.`;
+  }
   config.onDenied?.(intent, message);
-  return { decision: 'DENIED', errorCode, message, policyHash };
+  return { decision: 'DENIED', errorCode, message, policyHash, taskId };
 }

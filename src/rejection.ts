@@ -33,6 +33,34 @@ export function buildRejectionContext(
     };
   }
 
+  if (result.errorCode === 'SIGIL_LOOP_LIMIT_EXCEEDED') {
+    return {
+      sigil_decision: 'DENIED',
+      sigil_error_code: 'SIGIL_LOOP_LIMIT_EXCEEDED',
+      sigil_message: result.message ?? 'Sigil hard-stopped this agent run after it exceeded a loop ceiling.',
+      sigil_policy_hash: result.policyHash,
+      sigil_task_id: result.taskId,
+      sigil_action_taken: 'halted',
+      sigil_next_steps:
+        `Hard-stop the current run${result.taskId ? ` for task_id ${result.taskId}` : ''}. ` +
+        'Do not retry the tool call in this task. Start a new operator-approved task if work should continue.',
+    };
+  }
+
+  if (result.errorCode === 'SIGIL_LIMIT_STORE_UNAVAILABLE') {
+    return {
+      sigil_decision: 'DENIED',
+      sigil_error_code: 'SIGIL_LIMIT_STORE_UNAVAILABLE',
+      sigil_message: result.message ?? 'Sigil could not verify the loop budget.',
+      sigil_policy_hash: result.policyHash,
+      sigil_task_id: result.taskId,
+      sigil_action_taken: 'halted',
+      sigil_next_steps:
+        'Sigil failed closed because loop-budget state was unavailable. ' +
+        'Pause this action and retry only after Sigil Sign is healthy.',
+    };
+  }
+
   return {
     sigil_decision: 'DENIED',
     sigil_error_code: result.errorCode ?? 'SIGIL_POLICY_VIOLATION',

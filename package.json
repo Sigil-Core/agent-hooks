@@ -1,6 +1,6 @@
 {
   "name": "@sigilcore/agent-hooks",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "PreToolUse interceptor for autonomous AI agents — policy enforcement via Sigil Sign",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -15,7 +15,10 @@
   "publishConfig": {
     "provenance": true
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "test": "vitest run",

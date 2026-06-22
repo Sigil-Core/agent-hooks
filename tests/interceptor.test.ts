@@ -231,6 +231,87 @@ describe('checkIntent', () => {
     expect(body.intent.amount).toBe('1000000000000000000');
     expect(body.chainId).toBe(1);
     expect(typeof body.txCommit).toBe('string');
+    expect(typeof body.intent.task_id).toBe('string');
+  });
+
+  it('sends a configured task_id on every authorize call', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'APPROVED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await checkIntent(
+      { action: 'bash', command: 'npm test' },
+      { ...BASE_CONFIG, taskId: 'task-configured' },
+    );
+
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.intent.task_id).toBe('task-configured');
+  });
+
+  it('lets the intent taskId override the configured taskId', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'APPROVED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await checkIntent(
+      { action: 'bash', command: 'npm test', taskId: 'task-intent' },
+      { ...BASE_CONFIG, taskId: 'task-configured' },
+    );
+
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.intent.task_id).toBe('task-intent');
+  });
+
+  it('returns a hard-stop denial when Sigil reports a loop ceiling', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'DENIED',
+          error_code: 'SIGIL_LOOP_LIMIT_EXCEEDED',
+          message: 'Tool call count 51 exceeded per-task ceiling 50.',
+        }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await checkIntent(
+      { action: 'bash', command: 'npm test' },
+      { ...BASE_CONFIG, taskId: 'task-loop' },
+    );
+
+    expect(result.decision).toBe('DENIED');
+    expect(result.errorCode).toBe('SIGIL_LOOP_LIMIT_EXCEEDED');
+    expect(result.taskId).toBe('task-loop');
+    expect(result.message).toContain('Hard-stop this agent run');
+    expect(result.message).toContain('task_id task-loop');
+  });
+
+  it('surfaces loop store failures as distinct fail-closed denials', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'DENIED',
+          error_code: 'SIGIL_LIMIT_STORE_UNAVAILABLE',
+          message: 'Execution limit store unavailable.',
+        }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await checkIntent(
+      { action: 'bash', command: 'npm test' },
+      { ...BASE_CONFIG, taskId: 'task-loop' },
+    );
+
+    expect(result.decision).toBe('DENIED');
+    expect(result.errorCode).toBe('SIGIL_LIMIT_STORE_UNAVAILABLE');
+    expect(result.message).toContain('failed closed');
   });
 
   it('uses custom framework from config when provided', async () => {
