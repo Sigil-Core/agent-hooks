@@ -22,6 +22,9 @@ export function buildAuthorizeRequestBody(
   const agentId = intent.agentId ?? config.agentId ?? 'agent';
   const txCommit = intent.txCommit ?? generateIntentCommit(intent);
   const taskId = resolveTaskId(intent, config);
+  const metadata = intent.modelUsage
+    ? { ...(intent.metadata ?? {}), model_usage: intent.modelUsage }
+    : intent.metadata;
 
   return {
     framework: config.framework ?? 'agent-hooks',
@@ -36,7 +39,7 @@ export function buildAuthorizeRequestBody(
       targetAddress: intent.to,
       amount: intent.amount,
       task_id: taskId,
-      metadata: intent.metadata,
+      metadata,
     },
   };
 }

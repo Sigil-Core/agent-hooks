@@ -61,6 +61,37 @@ export function buildRejectionContext(
     };
   }
 
+  if (
+    result.errorCode === 'SIGIL_MODEL_SPEND_LIMIT_EXCEEDED' ||
+    result.errorCode === 'SIGIL_MODEL_TOKEN_LIMIT_EXCEEDED'
+  ) {
+    return {
+      sigil_decision: 'DENIED',
+      sigil_error_code: result.errorCode,
+      sigil_message: result.message ?? 'Sigil hard-stopped this task after it exceeded a model budget.',
+      sigil_policy_hash: result.policyHash,
+      sigil_task_id: result.taskId,
+      sigil_action_taken: 'halted',
+      sigil_next_steps:
+        `Hard-stop the current run${result.taskId ? ` for task_id ${result.taskId}` : ''}. ` +
+        'Do not start another model call in this task. Ask the operator to approve a new task or raise the signed budget.',
+    };
+  }
+
+  if (result.errorCode === 'SIGIL_MODEL_USAGE_UNAVAILABLE') {
+    return {
+      sigil_decision: 'DENIED',
+      sigil_error_code: 'SIGIL_MODEL_USAGE_UNAVAILABLE',
+      sigil_message: result.message ?? 'Sigil could not verify model usage for this budgeted task.',
+      sigil_policy_hash: result.policyHash,
+      sigil_task_id: result.taskId,
+      sigil_action_taken: 'halted',
+      sigil_next_steps:
+        'Sigil failed closed because the signed policy requires model usage reporting. ' +
+        'Do not continue until the adapter reports provider usage metadata for this task.',
+    };
+  }
+
   return {
     sigil_decision: 'DENIED',
     sigil_error_code: result.errorCode ?? 'SIGIL_POLICY_VIOLATION',

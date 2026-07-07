@@ -13,6 +13,27 @@ export const SIGIL_LOOP_LIMIT_EXCEEDED = 'SIGIL_LOOP_LIMIT_EXCEEDED' as const;
  * closed instead of allowing an unbounded tool loop.
  */
 export const SIGIL_LIMIT_STORE_UNAVAILABLE = 'SIGIL_LIMIT_STORE_UNAVAILABLE' as const;
+export const SIGIL_MODEL_SPEND_LIMIT_EXCEEDED = 'SIGIL_MODEL_SPEND_LIMIT_EXCEEDED' as const;
+export const SIGIL_MODEL_TOKEN_LIMIT_EXCEEDED = 'SIGIL_MODEL_TOKEN_LIMIT_EXCEEDED' as const;
+export const SIGIL_MODEL_USAGE_UNAVAILABLE = 'SIGIL_MODEL_USAGE_UNAVAILABLE' as const;
+
+export interface SigilModelUsage {
+  provider?: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  estimatedSpendUsd?: string;
+}
+
+export interface SigilModelUsageReport {
+  provider?: string;
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens: number;
+  estimated_spend_usd?: string;
+}
 
 export interface SigilIntent {
   action: string;          // e.g. 'bash', 'web_fetch', 'file_write', 'wallet.transfer'
@@ -26,6 +47,7 @@ export interface SigilIntent {
   txCommit?: string;       // EVM: SHA-256 hex of the raw tx, no 0x prefix
   taskId?: string;         // Stable task/session id for hard loop ceilings
   metadata?: Record<string, unknown>;
+  modelUsage?: SigilModelUsageReport;
 }
 
 export interface SigilHookConfig {
