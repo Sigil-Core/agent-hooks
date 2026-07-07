@@ -94,26 +94,20 @@ Sigil `DENIED` decisions (including `SIGIL_UNREACHABLE` in closed mode) surface 
 When an AgentPay agent executes a USD1 transfer on Ethereum (chainId 1) or BNB Smart Chain (chainId 56), the `wallet.transfer` or `wallet_sign` action routes through your Sigil policy before the transaction is signed.
 
 ```typescript
-import { checkIntent } from '@sigilcore/agent-hooks';
+import { checkAgentPayTransfer } from '@sigilcore/agent-hooks';
 
 // AgentPay initiates a USD1 transfer — Sigil evaluates policy first
-const result = await checkIntent(
-  {
-    action: 'wallet.transfer',
-    chainId: 1,                          // Ethereum mainnet
-    to: '0xRecipientAddress',
-    amount: '1000000000000000000',       // 1 USD1 in wei
-    txCommit: sha256(rawTx),
-  },
-  {
-    ...config,
-    failMode: 'closed',                  // required for wallet.* actions
-  },
-);
+const result = await checkAgentPayTransfer({
+  chainId: 1,                            // Ethereum mainnet
+  recipient: '0xRecipientAddress',
+  amount: '1000000000000000000',         // 1 USD1 in wei
+  txCommit: sha256(rawTx),
+  token: 'USD1',
+}, config);
 
-if (result.decision !== 'APPROVED') {
+if (!result.approved) {
   // Block the AgentPay transfer — policy not satisfied
-  return buildRejectionContext(result, 'wallet.transfer');
+  return result.rejection;
 }
 // AgentPay proceeds with signing
 ```
@@ -153,9 +147,46 @@ Native in-process integration (implementing IronClaw's `Hook` trait) ships as [`
 | OpenClaw | `createOpenclawSigilHandler` | TS | Adapter |
 | NVIDIA NemoClaw | `createOpenclawSigilHandler` | TS | Adapter (via OpenClaw) |
 | IronClaw (nearai) | [`sigil-agent-hooks-ironclaw`](https://github.com/Sigil-Core/agent-hooks-rs) | Rust | Adapter |
-| AgentPay (WLFI) | — | TS | Documentation |
+| OpenAI Codex | `createCodexPreToolUseHook` | TS | Adapter |
+| Hermes Agent | `createHermesPreToolCallHook` | TS | Adapter |
+| OpenRouter | `createOpenRouterToolGate` | TS | Adapter |
+| AgentPay (WLFI) | `checkAgentPayTransfer` | TS | Adapter |
 
 The typed registry lives at [`src/framework-registry.ts`](./src/framework-registry.ts) and is exported as `FRAMEWORKS`.
+
+## Model Budget Brakes
+
+Execution Limits v2 model budgets are enforced through cumulative
+`metadata.model_usage` reports on `model.inference` checks. Hosts record provider
+usage after model calls, then ask Sigil Sign whether the signed per-task spend or
+token cap still allows the task to continue.
+
+```typescript
+import {
+  buildRejectionContext,
+  checkModelBudget,
+  recordModelUsage,
+} from '@sigilcore/agent-hooks';
+
+recordModelUsage({
+  provider: 'anthropic',
+  model: 'claude-sonnet-4',
+  inputTokens: 100,
+  outputTokens: 25,
+  estimatedSpendUsd: '0.25',
+}, config);
+
+const budget = await checkModelBudget(config);
+if (budget.decision !== 'APPROVED') {
+  return buildRejectionContext(budget, 'model.inference');
+}
+```
+
+OpenRouter hosts can use `recordOpenRouterModelUsageAndCheckBudget(response,
+config)` to record response usage and check the budget in one call.
+`createOpenRouterToolGate` defaults to fail closed when `config.failMode` is not
+set, so malformed or unreachable tool checks return a structured denial instead
+of letting the host execute the call.
 
 ## Graceful Agent Degradation
 

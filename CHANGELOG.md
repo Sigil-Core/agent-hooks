@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-07
+
+### Added
+
+- Dedicated adapter exports for OpenAI Codex, Hermes Agent, OpenRouter, and AgentPay:
+  `createCodexPreToolUseHook`, `createHermesPreToolCallHook`,
+  `createOpenRouterToolGate`, `recordOpenRouterModelUsageAndCheckBudget`, and
+  `checkAgentPayTransfer`.
+- Adapter tests for Codex hook-specific deny output, Hermes block output,
+  OpenRouter tool-call rejection messages, OpenRouter model-budget usage
+  recording, and AgentPay fail-closed transfer checks.
+- Framework registry entries for `codex`, `hermes`, `openrouter`, `agentpay`,
+  `openclaw`, and `ironclaw`; AgentPay now resolves to the dedicated
+  `checkAgentPayTransfer` adapter export.
+
 ## [0.3.0] — 2026-06-22
 
 ### Added

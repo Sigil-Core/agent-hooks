@@ -9,8 +9,10 @@ evaluation.
 The package stays framework-agnostic at the core:
 
 - Core interceptor maps a proposed tool call into a Sigil intent.
-- Adapters translate Claude Code, OpenClaw, and other framework shapes into the
-  core intent contract.
+- Adapters translate Claude Code, Codex, Hermes, OpenClaw, OpenRouter,
+  AgentPay, and other framework shapes into the core intent contract.
+- Model-budget helpers keep a task-local usage ledger and submit cumulative
+  `metadata.model_usage` reports through the same `/v1/authorize` contract.
 - Sigil Sign remains the policy engine and attestation issuer.
 - Agent Hooks does not embed Sigil Lex or production policy evaluation logic.
 

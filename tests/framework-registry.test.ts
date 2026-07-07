@@ -11,11 +11,14 @@ describe('FRAMEWORKS registry', () => {
         'agent-hooks',
         'agentpay',
         'anthropic-sdk',
+        'codex',
         'eliza',
+        'hermes',
         'ironclaw',
         'langchain',
         'nemoclaw',
         'openclaw',
+        'openrouter',
       ].sort(),
     );
   });
