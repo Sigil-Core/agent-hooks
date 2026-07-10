@@ -57,14 +57,15 @@ export function createOpenRouterToolGate(
     const name = toolCall.function?.name ?? '';
     const args = parseToolArguments(toolCall.function?.arguments);
     const action = toolActionMap[name] ?? mapToolAction(name);
+    const intent = intentFromToolInput(action, args, {
+      ...args,
+      openrouter: {
+        toolCallId: toolCall.id,
+        originalFunctionName: name,
+      },
+    });
     const result = await checkIntent(
-      intentFromToolInput(action, args, {
-        ...args,
-        openrouter: {
-          toolCallId: toolCall.id,
-          originalFunctionName: name,
-        },
-      }),
+      intent,
       {
         ...config,
         framework: config.framework ?? 'openrouter',
@@ -76,7 +77,7 @@ export function createOpenRouterToolGate(
       return { approved: true, name, args, result };
     }
 
-    const rejection = buildRejectionContext(result, action);
+    const rejection = buildRejectionContext(result, intent.action);
     return {
       approved: false,
       name,

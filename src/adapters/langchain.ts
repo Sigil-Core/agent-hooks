@@ -4,6 +4,7 @@
 import { checkIntent } from '../interceptor.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig } from '../types.js';
+import { intentFromToolInput, mapToolAction, objectInput } from './shared.js';
 
 /**
  * Wraps a LangChain tool with a Sigil policy check.
@@ -16,8 +17,11 @@ export function wrapLangChainTool<T extends { name: string; call: (input: string
   const originalCall = tool.call.bind(tool);
 
   tool.call = async (input: string): Promise<string> => {
+    const action = mapToolAction(tool.name);
+    const structuredInput = parseStructuredInput(input);
+    const intent = intentFromToolInput(action, structuredInput, { input });
     const result = await checkIntent(
-      { action: tool.name.toLowerCase(), metadata: { input } },
+      intent,
       config,
     );
 
@@ -25,9 +29,17 @@ export function wrapLangChainTool<T extends { name: string; call: (input: string
       return originalCall(input);
     }
 
-    const rejection = buildRejectionContext(result, tool.name);
+    const rejection = buildRejectionContext(result, intent.action);
     return JSON.stringify(rejection);
   };
 
   return tool;
+}
+
+function parseStructuredInput(input: string): Record<string, unknown> {
+  try {
+    return objectInput(JSON.parse(input));
+  } catch {
+    return {};
+  }
 }

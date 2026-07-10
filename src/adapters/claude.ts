@@ -4,17 +4,7 @@
 import { checkIntent } from '../interceptor.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig, SigilIntent } from '../types.js';
-
-// Maps Anthropic tool names to Sigil action types
-const TOOL_ACTION_MAP: Record<string, string> = {
-  Bash: 'bash',
-  bash: 'bash',
-  WebSearch: 'web_fetch',
-  WebFetch: 'web_fetch',
-  computer: 'bash',
-  Write: 'file_write',
-  Edit: 'file_write',
-};
+import { intentFromToolInput, mapToolAction, objectInput } from './shared.js';
 
 export interface AnthropicToolUseBlock {
   type: 'tool_use';
@@ -31,21 +21,18 @@ export async function checkAnthropicToolUse(
   block: AnthropicToolUseBlock,
   config: SigilHookConfig,
 ): Promise<null | { type: 'tool_result'; tool_use_id: string; content: string; is_error: boolean }> {
-  const action = TOOL_ACTION_MAP[block.name] ?? block.name.toLowerCase();
-
-  const intent: SigilIntent = {
-    action,
-    command: block.input['command'] as string | undefined,
-    url: block.input['url'] as string | undefined,
-    path: block.input['path'] as string | undefined,
-    metadata: block.input,
-  };
+  const input = objectInput(block.input);
+  const intent: SigilIntent = intentFromToolInput(
+    mapToolAction(block.name),
+    input,
+    input,
+  );
 
   const result = await checkIntent(intent, config);
 
   if (result.decision === 'APPROVED') return null;
 
-  const rejection = buildRejectionContext(result, action);
+  const rejection = buildRejectionContext(result, intent.action);
   return {
     type: 'tool_result',
     tool_use_id: block.id,

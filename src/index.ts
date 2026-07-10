@@ -23,6 +23,7 @@ export {
 export { checkAgentPayTransfer } from './adapters/agentpay.js';
 export { FRAMEWORKS } from './framework-registry.js';
 export {
+  HTTP_METHODS,
   SIGIL_LIMIT_STORE_UNAVAILABLE,
   SIGIL_LOOP_LIMIT_EXCEEDED,
   SIGIL_MODEL_SPEND_LIMIT_EXCEEDED,
@@ -31,6 +32,8 @@ export {
   SIGIL_UNREACHABLE,
 } from './types.js';
 export type {
+  HttpMethod,
+  SigilHttpMethod,
   SigilDecision,
   SigilIntent,
   SigilHookConfig,

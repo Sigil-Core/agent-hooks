@@ -154,6 +154,36 @@ Native in-process integration (implementing IronClaw's `Hook` trait) ships as [`
 
 The typed registry lives at [`src/framework-registry.ts`](./src/framework-registry.ts) and is exported as `FRAMEWORKS`.
 
+## Typed HTTP intents
+
+The v2 policy profile uses `action: "http"` only when an adapter receives an
+explicit, uppercase HTTP method (`GET`, `HEAD`, `OPTIONS`, `POST`, `PUT`,
+`PATCH`, or `DELETE`) in a known HTTP/web tool input. The adapters never infer
+`GET`. Methodless web calls continue to use the legacy `web_fetch` action, so
+existing policies remain compatible.
+
+An explicit non-empty method that is not in the supported set still selects the
+typed `http` profile, but the invalid method is omitted from the wire intent.
+Sigil Sign then rejects the incomplete typed request instead of silently
+downgrading it to an untyped fetch. A `method` field attached to an unrelated
+tool is not promoted.
+
+The method-bearing extraction surface is intentionally narrow:
+
+| Adapter | HTTP method source |
+|---|---|
+| Claude / Anthropic | `WebFetch` / `WebSearch` input `method` |
+| Codex | `http` and known web tool input `method` |
+| Hermes | known web tool input `method` |
+| OpenRouter | mapped web function arguments `method` |
+| OpenClaw | known web tool params `method` |
+| ELIZA | `http` / known web action params `method` |
+| LangChain | JSON object input for `http` / known web tool names |
+| AgentPay | EVM transfer adapter; never an HTTP intent |
+
+For high-stakes actions, keep `failMode: "closed"` so a Sign validation or
+connectivity failure cannot release the underlying tool call.
+
 ## Model Budget Brakes
 
 Execution Limits v2 model budgets are enforced through cumulative
