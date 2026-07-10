@@ -2,6 +2,20 @@
 
 export type SigilDecision = 'APPROVED' | 'DENIED' | 'PENDING';
 
+/** HTTP methods accepted by the typed `http` intent profile. */
+export const HTTP_METHODS = [
+  'GET',
+  'HEAD',
+  'OPTIONS',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+] as const;
+
+export type HttpMethod = (typeof HTTP_METHODS)[number];
+export type SigilHttpMethod = HttpMethod;
+
 export const SIGIL_UNREACHABLE = 'SIGIL_UNREACHABLE' as const;
 /**
  * Returned when Sigil denies a tool call because an execution limit ceiling was
@@ -36,11 +50,12 @@ export interface SigilModelUsageReport {
 }
 
 export interface SigilIntent {
-  action: string;          // e.g. 'bash', 'web_fetch', 'file_write', 'wallet.transfer'
+  action: string;          // e.g. 'bash', 'web_fetch', 'http', 'file_write', 'wallet.transfer'
   agentId?: string;
   chainId?: number;        // EVM only
   command?: string;        // bash only
-  url?: string;            // web_fetch only
+  url?: string;            // web_fetch/http only
+  method?: HttpMethod;     // typed http only; adapters never infer GET
   path?: string;           // file_write only
   to?: string;             // wallet.transfer only
   amount?: string;         // wallet.transfer only — wei as string

@@ -4,6 +4,7 @@
 import { checkIntent } from '../interceptor.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig, SigilIntent, SigilRejectionContext } from '../types.js';
+import { intentFromToolInput, mapToolAction, objectInput } from './shared.js';
 
 export interface ElizaAction {
   name: string;
@@ -18,16 +19,18 @@ export async function checkElizaAction(
   action: ElizaAction,
   config: SigilHookConfig,
 ): Promise<null | { blocked: true; rejection: SigilRejectionContext }> {
-  const intent: SigilIntent = {
-    action: action.name.toLowerCase(),
-    metadata: action.params,
-  };
+  const input = objectInput(action.params);
+  const intent: SigilIntent = intentFromToolInput(
+    mapToolAction(action.name),
+    input,
+    action.params,
+  );
 
   const result = await checkIntent(intent, config);
   if (result.decision === 'APPROVED') return null;
 
   return {
     blocked: true,
-    rejection: buildRejectionContext(result, action.name),
+    rejection: buildRejectionContext(result, intent.action),
   };
 }

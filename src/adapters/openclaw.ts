@@ -2,19 +2,7 @@
 import { checkIntent } from '../interceptor.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig, SigilIntent } from '../types.js';
-
-const TOOL_ACTION_MAP: Record<string, string> = {
-  exec: 'bash',
-  process: 'bash',
-  code_execution: 'bash',
-  write: 'file_write',
-  edit: 'file_write',
-  apply_patch: 'file_write',
-  web_fetch: 'web_fetch',
-  web_search: 'web_fetch',
-  x_search: 'web_fetch',
-  browser: 'web_fetch',
-};
+import { intentFromToolInput, mapToolAction } from './shared.js';
 
 export interface OpenclawBeforeToolCallEvent {
   toolName: string;
@@ -50,14 +38,9 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
     event: OpenclawBeforeToolCallEvent,
     ctx: OpenclawToolContext,
   ): Promise<OpenclawBeforeToolCallResult | undefined> => {
-    const action = TOOL_ACTION_MAP[event.toolName] ?? event.toolName.toLowerCase();
+    const action = mapToolAction(event.toolName);
     const intent: SigilIntent = {
-      action,
-      agentId: ctx.agentId ?? config.agentId,
-      command: event.params['command'] as string | undefined,
-      url: event.params['url'] as string | undefined,
-      path: event.params['path'] as string | undefined,
-      metadata: {
+      ...intentFromToolInput(action, event.params, {
         ...event.params,
         openclaw: {
           sessionKey: ctx.sessionKey,
@@ -66,7 +49,8 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
           toolCallId: ctx.toolCallId ?? event.toolCallId,
           originalToolName: event.toolName,
         },
-      },
+      }),
+      agentId: ctx.agentId ?? config.agentId,
     };
 
     const result = await checkIntent(intent, {
@@ -81,7 +65,7 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
     // the call without resolving the Sigil hold, bypassing enforcement. The
     // hold_id is surfaced in blockReason so operators can resolve it out of
     // band via Sigil Command.
-    const rejection = buildRejectionContext(result, action);
+    const rejection = buildRejectionContext(result, intent.action);
     const holdSuffix = rejection.sigil_hold_id
       ? ` (hold_id: ${rejection.sigil_hold_id})`
       : '';

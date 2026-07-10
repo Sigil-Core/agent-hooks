@@ -35,18 +35,19 @@ export function createCodexPreToolUseHook(config: SigilHookConfig) {
   return async (payload: CodexPreToolUsePayload): Promise<CodexPreToolUseResult> => {
     const input = objectInput(payload.tool_input);
     const action = mapToolAction(payload.tool_name);
+    const intent = intentFromToolInput(action, input, {
+      ...input,
+      codex: {
+        cwd: payload.cwd,
+        model: payload.model,
+        permissionMode: payload.permission_mode,
+        toolName: payload.tool_name,
+        toolUseId: payload.tool_use_id,
+        coverage: codexCoverage(payload.tool_name),
+      },
+    });
     const result = await checkIntent(
-      intentFromToolInput(action, input, {
-        ...input,
-        codex: {
-          cwd: payload.cwd,
-          model: payload.model,
-          permissionMode: payload.permission_mode,
-          toolName: payload.tool_name,
-          toolUseId: payload.tool_use_id,
-          coverage: codexCoverage(payload.tool_name),
-        },
-      }),
+      intent,
       {
         ...config,
         framework: config.framework ?? 'codex',
@@ -57,7 +58,7 @@ export function createCodexPreToolUseHook(config: SigilHookConfig) {
 
     if (result.decision === 'APPROVED') return undefined;
 
-    const rejection = buildRejectionContext(result, action);
+    const rejection = buildRejectionContext(result, intent.action);
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',

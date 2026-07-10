@@ -32,16 +32,17 @@ export function createHermesPreToolCallHook(config: SigilHookConfig) {
     const toolName = valueAsString(payload.tool_name) ?? valueAsString(payload.toolName) ?? '';
     const input = objectInput(payload.tool_input ?? payload.toolInput);
     const action = mapToolAction(toolName);
+    const intent = intentFromToolInput(action, input, {
+      ...input,
+      hermes: {
+        originalToolName: toolName,
+        sessionId: payload.session_id,
+        conversationId: payload.conversation_id,
+        runId: payload.run_id,
+      },
+    });
     const result = await checkIntent(
-      intentFromToolInput(action, input, {
-        ...input,
-        hermes: {
-          originalToolName: toolName,
-          sessionId: payload.session_id,
-          conversationId: payload.conversation_id,
-          runId: payload.run_id,
-        },
-      }),
+      intent,
       {
         ...config,
         framework: config.framework ?? 'hermes',
@@ -51,7 +52,7 @@ export function createHermesPreToolCallHook(config: SigilHookConfig) {
 
     if (result.decision === 'APPROVED') return {};
 
-    const rejection = buildRejectionContext(result, action);
+    const rejection = buildRejectionContext(result, intent.action);
     return {
       decision: 'block',
       reason: `${rejection.sigil_error_code}: ${rejection.sigil_message}`,
