@@ -65,6 +65,8 @@ export interface SigilIntent {
   modelUsage?: SigilModelUsageReport;
 }
 
+export type ExecutionBoundary = 'structured_tool' | 'preflight_only';
+
 export interface SigilHookConfig {
   apiKey: string;          // sk_sigil_... from sigilcore.com/tools/keys
   apiUrl?: string;         // default: https://sign.sigilcore.com
@@ -73,6 +75,14 @@ export interface SigilHookConfig {
   taskId?: string;         // default: generated once per process/session
   failMode?: 'open' | 'closed';    // default: 'open'
   requestTimeoutMs?: number;       // default: 10_000
+  /** Explicit repository boundary used for Policy 2.1 effect extraction. */
+  repositoryRoot?: string;
+  /** Current TypeScript hooks are preflight adapters unless a host owns final mutation. */
+  executionBoundary?: ExecutionBoundary;
+  executionAdapterVersion?: string;
+  mutationOwner?: string;
+  writableRoots?: string[];
+  readableRoots?: string[];
   onDenied?: (intent: SigilIntent, reason: string) => void;
   onPending?: (intent: SigilIntent, holdId: string) => void;
   onError?: (intent: SigilIntent, error: Error) => void;

@@ -184,6 +184,27 @@ The method-bearing extraction surface is intentionally narrow:
 For high-stakes actions, keep `failMode: "closed"` so a Sign validation or
 connectivity failure cannot release the underlying tool call.
 
+## Policy 2.1 repository preflight
+
+Set `repositoryRoot` when a hook needs local effect-manifest extraction for
+Codex `apply_patch` or another file-write intent. The hook serializes target
+paths, effects, and a manifest hash, and removes caller-supplied filesystem or
+execution attestations before authorization.
+
+```typescript
+const config = {
+  apiKey: process.env.SIGIL_API_KEY!,
+  repositoryRoot: process.cwd(),
+  failMode: 'closed' as const,
+  executionBoundary: 'preflight_only' as const,
+};
+```
+
+This TypeScript hook remains preflight-only. It does not own the final
+mutation, race-safe path resolution, or execution grant issuance. Policy 2.1
+must reject it for destructive writes until a structured adapter owns those
+capabilities.
+
 ## Model Budget Brakes
 
 Execution Limits v2 model budgets are enforced through cumulative

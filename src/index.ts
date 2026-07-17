@@ -1,7 +1,8 @@
 // src/index.ts
 
 export { checkIntent } from './interceptor.js';
-export { buildAuthorizeRequestBody, serializeAuthorizeRequestBody } from './request.js';
+export { buildAuthorizeRequestBody, serializeAuthorizeRequestBody, extractFilesystemManifest } from './request.js';
+export { parseApplyPatchTargets, buildSingleFileManifest } from './filesystem.js';
 export { buildRejectionContext } from './rejection.js';
 export {
   checkModelBudget,
@@ -41,7 +42,9 @@ export type {
   SigilModelUsage,
   SigilModelUsageReport,
   SigilRejectionContext,
+  ExecutionBoundary,
 } from './types.js';
+export type { FileEffectManifest, FileEffectTarget } from './filesystem.js';
 export type { AnthropicToolUseBlock } from './adapters/claude.js';
 export type {
   CodexPreToolUseDenyResult,

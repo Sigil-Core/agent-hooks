@@ -1,5 +1,5 @@
 // src/interceptor.ts
-import { resolveTaskId, serializeAuthorizeRequestBody } from './request.js';
+import { extractFilesystemManifest, resolveTaskId, serializeAuthorizeRequestBody } from './request.js';
 import type { SigilHookConfig, SigilHookResult, SigilIntent } from './types.js';
 import {
   SIGIL_LIMIT_STORE_UNAVAILABLE,
@@ -13,6 +13,20 @@ export async function checkIntent(
   intent: SigilIntent,
   config: SigilHookConfig,
 ): Promise<SigilHookResult> {
+  if (config.repositoryRoot && config.failMode !== 'closed') {
+    return {
+      decision: 'DENIED',
+      errorCode: 'SIGIL_POLICY_VIOLATION_EXECUTION_BOUNDARY_REQUIRED',
+      message: 'Policy 2.1 repository boundaries require failMode: closed',
+    };
+  }
+  if (config.repositoryRoot && intent.action === 'file_write' && typeof intent.command === 'string' && intent.command.includes('*** Begin Patch') && !extractFilesystemManifest(intent, config)) {
+    return {
+      decision: 'DENIED',
+      errorCode: 'SIGIL_POLICY_VIOLATION_FILE_TARGET_UNTRUSTED',
+      message: 'The apply_patch payload did not yield a complete target manifest',
+    };
+  }
   const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
   const body = serializeAuthorizeRequestBody(intent, config);
   const taskId = resolveTaskId(intent, config);
