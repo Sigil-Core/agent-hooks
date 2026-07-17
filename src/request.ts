@@ -46,7 +46,7 @@ export function buildAuthorizeRequestBody(
     metadata['execution'] = {
       adapter: 'agent-hooks-typescript',
       adapter_version: config.executionAdapterVersion ?? '2.1.0',
-      fail_mode: config.failMode ?? 'open',
+      fail_mode: config.failMode ?? 'closed',
       boundary_type: config.executionBoundary ?? 'preflight_only',
       ...(config.mutationOwner ? { mutation_owner: config.mutationOwner } : {}),
       platform: process.platform,

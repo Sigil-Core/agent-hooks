@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAuthorizeRequestBody,
+  buildSingleFileManifest,
   extractFilesystemManifest,
   parseApplyPatchTargets,
 } from '../src/index.js';
@@ -41,6 +42,20 @@ describe('Policy 2.1 filesystem manifests', () => {
     expect(parseApplyPatchTargets('*** Begin Patch\n*** Update File: ../outside\n*** End Patch', '/repo')).toBeNull();
     expect(parseApplyPatchTargets('*** Begin Patch\n*** Update File: src/file.ts\n*** End Patch')).toBeNull();
     expect(extractFilesystemManifest({ action: 'file_write' }, config)).toBeNull();
+    expect(buildSingleFileManifest('/etc/passwd', '/repo')).toBeNull();
+  });
+
+  it('denies an apply_patch payload without a trusted target manifest', async () => {
+    const result = await checkIntent({
+      action: 'file_write',
+      command: '*** Begin Patch\n*** Update File: ../outside\n*** End Patch',
+    }, config);
+
+    expect(result).toEqual({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_POLICY_VIOLATION_FILE_TARGET_UNTRUSTED',
+      message: 'The apply_patch payload did not yield a complete target manifest',
+    });
   });
 
   it('serializes the local effect and execution metadata while stripping caller-supplied attestations', () => {

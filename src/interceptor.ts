@@ -13,7 +13,8 @@ export async function checkIntent(
   intent: SigilIntent,
   config: SigilHookConfig,
 ): Promise<SigilHookResult> {
-  if (config.repositoryRoot && config.failMode !== 'closed') {
+  const effectiveFailMode = config.failMode ?? (config.repositoryRoot ? 'closed' : 'open');
+  if (config.repositoryRoot && effectiveFailMode !== 'closed') {
     return {
       decision: 'DENIED',
       errorCode: 'SIGIL_POLICY_VIOLATION_EXECUTION_BOUNDARY_REQUIRED',
@@ -56,7 +57,7 @@ export async function checkIntent(
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
     config.onError?.(intent, error);
-    const failMode = config.failMode ?? 'open';
+    const failMode = effectiveFailMode;
     console.warn(JSON.stringify({
       level: failMode === 'closed' ? 'error' : 'warn',
       event: 'sigil_hook_unreachable',

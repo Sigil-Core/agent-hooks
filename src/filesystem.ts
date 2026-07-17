@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { isAbsolute, join, normalize } from 'node:path';
+import { dirname, isAbsolute, join, normalize, resolve, win32 } from 'node:path';
 
 export interface FileEffectTarget {
   supplied: string;
@@ -28,12 +28,14 @@ function targetForPath(supplied: string, repositoryRoot?: string): FileEffectTar
   if (!supplied || supplied.includes('\0')) return null;
   const suppliedParts = supplied.replaceAll('\\', '/').split('/');
   if (suppliedParts.includes('..')) return null;
-  const root = repositoryRoot ? normalize(repositoryRoot) : undefined;
-  const absolute = root && !isAbsolute(supplied) ? normalize(join(root, supplied)) : normalize(supplied);
-  if (!isAbsolute(absolute)) return null;
-  const lastSlash = absolute.lastIndexOf('/');
-  const resolvedParent = lastSlash > 0 ? absolute.slice(0, lastSlash) : '/';
-  return { supplied, absolute, resolved_parent: resolvedParent };
+  const root = repositoryRoot ? resolve(repositoryRoot) : undefined;
+  const suppliedIsAbsolute = isAbsolute(suppliedParts.join('/')) || win32.isAbsolute(supplied);
+  const absolute = normalize(suppliedIsAbsolute ? suppliedParts.join('/') : (root ? join(root, suppliedParts.join('/')) : supplied));
+  const normalizedAbsolute = absolute.replaceAll('\\', '/');
+  const normalizedRoot = root?.replaceAll('\\', '/');
+  if (!isAbsolute(absolute) || (normalizedRoot && normalizedAbsolute !== normalizedRoot && !normalizedAbsolute.startsWith(`${normalizedRoot}/`))) return null;
+  const resolvedParent = dirname(absolute).replaceAll('\\', '/');
+  return { supplied, absolute: normalizedAbsolute, resolved_parent: resolvedParent };
 }
 
 /**
