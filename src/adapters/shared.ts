@@ -27,6 +27,8 @@ export const TOOL_ACTION_MAP: Record<string, string> = {
   computer: 'bash',
   wallet_transfer: 'wallet.transfer',
   'wallet.transfer': 'wallet.transfer',
+  contract_call: 'contract.call',
+  'contract.call': 'contract.call',
 };
 
 export function mapToolAction(toolName: string): string {

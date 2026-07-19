@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { decodeErc20Calldata } from '../src/evm-calldata.js';
-import { intentFromToolInput } from '../src/adapters/shared.js';
+import { intentFromToolInput, mapToolAction } from '../src/adapters/shared.js';
 import { buildAuthorizeRequestBody } from '../src/request.js';
 
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
@@ -95,6 +95,25 @@ describe('decodeErc20Calldata', () => {
 });
 
 describe('intentFromToolInput — EVM amount contract', () => {
+  it.each(['contract_call', 'contract.call'])(
+    'maps %s to the enriched contract.call action',
+    (toolName) => {
+      const action = mapToolAction(toolName);
+      const intent = intentFromToolInput(action, {
+        chainId: 1,
+        to: USDC,
+        calldata: TRANSFER_CALLDATA,
+      });
+
+      expect(action).toBe('contract.call');
+      expect(intent.amount).toBe('0');
+      expect(intent.metadata?.['evm']).toEqual(expect.objectContaining({
+        selector: '0xa9059cbb',
+        token_target: USDC.toLowerCase(),
+      }));
+    },
+  );
+
   it('passes a supplied amount through verbatim', () => {
     const intent = intentFromToolInput('wallet.transfer', { amount: '1.5', chainId: 1, to: RECIPIENT });
     expect(intent.amount).toBe('1.5');
