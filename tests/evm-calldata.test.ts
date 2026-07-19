@@ -102,6 +102,7 @@ describe('intentFromToolInput — EVM amount contract', () => {
       const intent = intentFromToolInput(action, {
         chainId: 1,
         to: USDC,
+        value: '0x0',
         calldata: TRANSFER_CALLDATA,
       });
 
@@ -125,6 +126,14 @@ describe('intentFromToolInput — EVM amount contract', () => {
   });
 
   it.each([
+    ['zero', '0x0', '0'],
+    ['one ether', '0xde0b6b3a7640000', '1000000000000000000'],
+  ])('converts the standard JSON-RPC %s quantity exactly', (_name, value, expected) => {
+    const intent = intentFromToolInput('contract.call', { value, chainId: 1, to: USDC });
+    expect(intent.amount).toBe(expected);
+  });
+
+  it.each([
     ['negative string', '-1'],
     ['exponent string', '1e18'],
     ['negative number', -1],
@@ -136,9 +145,22 @@ describe('intentFromToolInput — EVM amount contract', () => {
     expect(intent.amount).toBeUndefined();
   });
 
-  it('defaults contract.call with no amount/value key to explicit "0"', () => {
+  it('leaves contract.call without an explicit amount absent so Sign fails closed', () => {
     const intent = intentFromToolInput('contract.call', { chainId: 1, to: USDC, calldata: TRANSFER_CALLDATA });
-    expect(intent.amount).toBe('0');
+    expect(intent.amount).toBeUndefined();
+  });
+
+  it.each([
+    ['valueWei', { valueWei: '0xde0b6b3a7640000' }],
+    ['nested tx.value', { tx: { value: '0xde0b6b3a7640000' } }],
+  ])('does not invent zero when %s may carry native value', (_name, extra) => {
+    const intent = intentFromToolInput('contract.call', {
+      chainId: 1,
+      to: USDC,
+      calldata: TRANSFER_CALLDATA,
+      ...extra,
+    });
+    expect(intent.amount).toBeUndefined();
   });
 
   it('leaves wallet.transfer without any amount absent so Sign fails closed', () => {
@@ -192,6 +214,22 @@ describe('intentFromToolInput — EVM amount contract', () => {
     );
     expect(intent.metadata?.['job_type']).toBe('rebalance');
     expect(intent.metadata?.['evm']).toBeDefined();
+  });
+
+  it('drops caller-supplied evm metadata when calldata cannot be decoded', () => {
+    const intent = intentFromToolInput(
+      'contract.call',
+      { chainId: 1, to: USDC, calldata: '0xabc' },
+      {
+        job_type: 'rebalance',
+        evm: {
+          selector: '0xa9059cbb',
+          token_target: USDC.toLowerCase(),
+          token_amount: '1',
+        },
+      },
+    );
+    expect(intent.metadata).toEqual({ job_type: 'rebalance' });
   });
 
   it('does not attach evm metadata for wallet.transfer', () => {

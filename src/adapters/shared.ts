@@ -116,6 +116,9 @@ function valueAsAmount(value: unknown): string | undefined {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     if (/^\d+(?:\.\d+)?$/.test(trimmed)) return trimmed;
+    if (/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(trimmed)) {
+      return BigInt(trimmed).toString(10);
+    }
   }
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
     return String(value);
@@ -152,16 +155,14 @@ function resolveSuppliedEvmAmount(input: Record<string, unknown>): string | unde
  * Sign fails closed on a missing amount under Policy 2.1 (and under the
  * SIGIL_EVM_AMOUNT_REQUIRED deployment flag for legacy policies), so:
  * - a supplied amount/value field is passed through verbatim;
- * - a contract.call whose input carries neither an amount nor a value key
- *   provably moves no native value in the tool's own schema → "0";
- * - a wallet.transfer without any amount stays absent on purpose — the
- *   adapter cannot prove the transfer's value, and inventing "0" would let
- *   an unknown-value transfer pass under the cap. Sign denies it.
+ * - a call without an amount stays absent on purpose. This shared adapter
+ *   cannot prove that alternate fields such as valueWei or tx.value do not
+ *   carry native value, and inventing "0" would let an unknown-value call
+ *   pass under the cap. Sign denies it.
  */
-function resolveEvmAmount(action: string, input: Record<string, unknown>): string | undefined {
+function resolveEvmAmount(input: Record<string, unknown>): string | undefined {
   const supplied = resolveSuppliedEvmAmount(input);
   if (supplied !== undefined) return supplied;
-  if (action === 'contract.call' && !('amount' in input) && !('value' in input)) return '0';
   return undefined;
 }
 
@@ -178,9 +179,12 @@ export function intentFromToolInput(
   const decodedCalldata = web.action === 'contract.call'
     ? decodeErc20Calldata(valueAsString(input['to']) ?? valueAsString(input['targetAddress']), calldata)
     : undefined;
-  const mergedMetadata = decodedCalldata
-    ? { ...(metadata ?? {}), evm: decodedCalldata }
+  const trustedMetadata = web.action === 'contract.call' && metadata
+    ? Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'evm'))
     : metadata;
+  const mergedMetadata = decodedCalldata
+    ? { ...(trustedMetadata ?? {}), evm: decodedCalldata }
+    : trustedMetadata;
   return {
     action: web.action,
     command: valueAsString(input['command']),
@@ -188,7 +192,7 @@ export function intentFromToolInput(
     method: web.method,
     path: valueAsString(input['path']),
     to: valueAsString(input['to']) ?? valueAsString(input['targetAddress']),
-    amount: evm ? resolveEvmAmount(web.action, input) : valueAsString(input['amount']),
+    amount: evm ? resolveEvmAmount(input) : valueAsString(input['amount']),
     calldata,
     chainId: valueAsNumber(input['chainId']) ?? valueAsNumber(input['chain_id']),
     txCommit: valueAsString(input['txCommit']) ?? valueAsString(input['tx_commit']),
