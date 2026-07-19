@@ -62,6 +62,7 @@ function generateIntentCommit(intent: SigilIntent): string {
     path: intent.path,
     to: intent.to,
     amount: intent.amount,
+    calldata: intent.calldata,
     ts: Math.floor(Date.now() / 1000),
   });
   return createHash('sha256').update(preimage).digest('hex');

@@ -18,7 +18,7 @@ export interface EvmCalldataMetadata {
   token_amount?: string;
 }
 
-const ADDRESS_WORD = /^[0-9a-f]{24}([0-9a-f]{40})$/;
+const ADDRESS_WORD = /^0{24}([0-9a-f]{40})$/;
 
 function decodeWord(words: string[], index: number): string | undefined {
   return words[index];

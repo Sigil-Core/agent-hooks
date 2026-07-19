@@ -105,10 +105,43 @@ function isEvmAction(action: string): boolean {
   return (EVM_ACTIONS as readonly string[]).includes(action);
 }
 
-/** A supplied amount/value as a decimal string; numbers are stringified only when finite. */
+/**
+ * Accepts canonical non-negative decimal strings. Numeric inputs must be
+ * non-negative safe integers so conversion cannot round an authorization
+ * amount; callers use strings for fractional or larger values.
+ */
 function valueAsAmount(value: unknown): string | undefined {
-  if (typeof value === 'string' && value.trim() !== '') return value.trim();
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d+(?:\.\d+)?$/.test(trimmed)) return trimmed;
+  }
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    return String(value);
+  }
+  return undefined;
+}
+
+/** Normalizes raw contract calldata to lowercase, even-length, 0x-prefixed hex. */
+function valueAsCalldata(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  const hex = trimmed.replace(/^0x/i, '');
+  if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 !== 0) return undefined;
+  return `0x${hex.toLowerCase()}`;
+}
+
+function resolveEvmCalldata(input: Record<string, unknown>): string | undefined {
+  const preferred = valueAsString(input['calldata']);
+  if (preferred !== undefined) return valueAsCalldata(preferred);
+  return valueAsCalldata(valueAsString(input['data']));
+}
+
+/** A supplied amount/value as a canonical decimal string. */
+function resolveSuppliedEvmAmount(input: Record<string, unknown>): string | undefined {
+  const amount = valueAsAmount(input['amount']);
+  if (amount !== undefined) return amount;
+  const value = valueAsAmount(input['value']);
+  if (value !== undefined) return value;
   return undefined;
 }
 
@@ -124,7 +157,7 @@ function valueAsAmount(value: unknown): string | undefined {
  *   an unknown-value transfer pass under the cap. Sign denies it.
  */
 function resolveEvmAmount(action: string, input: Record<string, unknown>): string | undefined {
-  const supplied = valueAsAmount(input['amount']) ?? valueAsAmount(input['value']);
+  const supplied = resolveSuppliedEvmAmount(input);
   if (supplied !== undefined) return supplied;
   if (action === 'contract.call' && !('amount' in input) && !('value' in input)) return '0';
   return undefined;
@@ -137,8 +170,8 @@ export function intentFromToolInput(
 ): SigilIntent {
   const web = resolveWebAction(action, input);
   const evm = isEvmAction(web.action);
-  const calldata = evm
-    ? valueAsString(input['calldata']) ?? valueAsString(input['data'])
+  const calldata = web.action === 'contract.call'
+    ? resolveEvmCalldata(input)
     : undefined;
   const decodedCalldata = web.action === 'contract.call'
     ? decodeErc20Calldata(valueAsString(input['to']) ?? valueAsString(input['targetAddress']), calldata)
