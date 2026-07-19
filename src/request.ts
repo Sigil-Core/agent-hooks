@@ -39,6 +39,7 @@ export function buildAuthorizeRequestBody(
       path: intent.path,
       targetAddress: intent.to,
       amount: intent.amount,
+      calldata: intent.calldata,
       task_id: taskId,
       metadata,
     },
