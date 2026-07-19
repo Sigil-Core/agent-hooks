@@ -1,5 +1,6 @@
 import { HTTP_METHODS } from '../types.js';
 import type { HttpMethod, SigilHookConfig, SigilIntent } from '../types.js';
+import { decodeErc20Calldata } from '../evm-calldata.js';
 
 export const TOOL_ACTION_MAP: Record<string, string> = {
   Bash: 'bash',
@@ -26,6 +27,8 @@ export const TOOL_ACTION_MAP: Record<string, string> = {
   computer: 'bash',
   wallet_transfer: 'wallet.transfer',
   'wallet.transfer': 'wallet.transfer',
+  contract_call: 'contract.call',
+  'contract.call': 'contract.call',
 };
 
 export function mapToolAction(toolName: string): string {
@@ -98,12 +101,90 @@ export function resolveTaskIdFromPayload(
     ?? process.env['SIGIL_TASK_ID'];
 }
 
+const EVM_ACTIONS = ['wallet.transfer', 'contract.call'] as const;
+
+function isEvmAction(action: string): boolean {
+  return (EVM_ACTIONS as readonly string[]).includes(action);
+}
+
+/**
+ * Accepts canonical non-negative decimal strings. Numeric inputs must be
+ * non-negative safe integers so conversion cannot round an authorization
+ * amount; callers use strings for fractional or larger values.
+ */
+function valueAsAmount(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d+(?:\.\d+)?$/.test(trimmed)) return trimmed;
+    if (/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(trimmed)) {
+      return BigInt(trimmed).toString(10);
+    }
+  }
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    return String(value);
+  }
+  return undefined;
+}
+
+/** Normalizes raw contract calldata to lowercase, even-length, 0x-prefixed hex. */
+function valueAsCalldata(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  const hex = trimmed.replace(/^0x/i, '');
+  if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 !== 0) return undefined;
+  return `0x${hex.toLowerCase()}`;
+}
+
+function resolveEvmCalldata(input: Record<string, unknown>): string | undefined {
+  const preferred = valueAsString(input['calldata']);
+  if (preferred !== undefined) return valueAsCalldata(preferred);
+  return valueAsCalldata(valueAsString(input['data']));
+}
+
+/** A supplied amount/value as a canonical decimal string. */
+function resolveSuppliedEvmAmount(input: Record<string, unknown>): string | undefined {
+  const amount = valueAsAmount(input['amount']);
+  if (amount !== undefined) return amount;
+  const value = valueAsAmount(input['value']);
+  if (value !== undefined) return value;
+  return undefined;
+}
+
+/**
+ * EVM intents always carry an amount when the tool input can prove one.
+ * Sign fails closed on a missing amount under Policy 2.1 (and under the
+ * SIGIL_EVM_AMOUNT_REQUIRED deployment flag for legacy policies), so:
+ * - a supplied amount/value field is passed through verbatim;
+ * - a call without an amount stays absent on purpose. This shared adapter
+ *   cannot prove that alternate fields such as valueWei or tx.value do not
+ *   carry native value, and inventing "0" would let an unknown-value call
+ *   pass under the cap. Sign denies it.
+ */
+function resolveEvmAmount(input: Record<string, unknown>): string | undefined {
+  const supplied = resolveSuppliedEvmAmount(input);
+  if (supplied !== undefined) return supplied;
+  return undefined;
+}
+
 export function intentFromToolInput(
   action: string,
   input: Record<string, unknown>,
   metadata?: Record<string, unknown>,
 ): SigilIntent {
   const web = resolveWebAction(action, input);
+  const evm = isEvmAction(web.action);
+  const calldata = web.action === 'contract.call'
+    ? resolveEvmCalldata(input)
+    : undefined;
+  const decodedCalldata = web.action === 'contract.call'
+    ? decodeErc20Calldata(valueAsString(input['to']) ?? valueAsString(input['targetAddress']), calldata)
+    : undefined;
+  const trustedMetadata = web.action === 'contract.call' && metadata
+    ? Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'evm'))
+    : metadata;
+  const mergedMetadata = decodedCalldata
+    ? { ...(trustedMetadata ?? {}), evm: decodedCalldata }
+    : trustedMetadata;
   return {
     action: web.action,
     command: valueAsString(input['command']),
@@ -111,9 +192,10 @@ export function intentFromToolInput(
     method: web.method,
     path: valueAsString(input['path']),
     to: valueAsString(input['to']) ?? valueAsString(input['targetAddress']),
-    amount: valueAsString(input['amount']),
+    amount: evm ? resolveEvmAmount(input) : valueAsString(input['amount']),
+    calldata,
     chainId: valueAsNumber(input['chainId']) ?? valueAsNumber(input['chain_id']),
     txCommit: valueAsString(input['txCommit']) ?? valueAsString(input['tx_commit']),
-    metadata,
+    metadata: mergedMetadata,
   };
 }
