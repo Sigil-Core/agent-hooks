@@ -142,13 +142,21 @@ function resolveEvmCalldata(input: Record<string, unknown>): string | undefined 
 }
 
 /** A supplied amount/value as a canonical decimal string. */
-function resolveSuppliedEvmAmount(input: Record<string, unknown>): string | undefined {
-  const amount = valueAsAmount(input['amount']);
-  if (amount !== undefined) return amount;
-  const value = valueAsAmount(input['value']);
-  if (value !== undefined) return value;
-  return undefined;
-}
+const resolveSuppliedEvmAmount = (
+  action: string,
+  input: Record<string, unknown>,
+): string | undefined => {
+  if (action === 'contract.call') {
+    if (Object.prototype.hasOwnProperty.call(input, 'value')) {
+      return valueAsAmount(input['value']);
+    }
+    return valueAsAmount(input['amount']);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, 'amount')) {
+    return valueAsAmount(input['amount']);
+  }
+  return valueAsAmount(input['value']);
+};
 
 /**
  * EVM intents always carry an amount when the tool input can prove one.
@@ -160,11 +168,14 @@ function resolveSuppliedEvmAmount(input: Record<string, unknown>): string | unde
  *   carry native value, and inventing "0" would let an unknown-value call
  *   pass under the cap. Sign denies it.
  */
-function resolveEvmAmount(input: Record<string, unknown>): string | undefined {
-  const supplied = resolveSuppliedEvmAmount(input);
+const resolveEvmAmount = (
+  action: string,
+  input: Record<string, unknown>,
+): string | undefined => {
+  const supplied = resolveSuppliedEvmAmount(action, input);
   if (supplied !== undefined) return supplied;
   return undefined;
-}
+};
 
 export function intentFromToolInput(
   action: string,
@@ -192,7 +203,7 @@ export function intentFromToolInput(
     method: web.method,
     path: valueAsString(input['path']),
     to: valueAsString(input['to']) ?? valueAsString(input['targetAddress']),
-    amount: evm ? resolveEvmAmount(input) : valueAsString(input['amount']),
+    amount: evm ? resolveEvmAmount(web.action, input) : valueAsString(input['amount']),
     calldata,
     chainId: valueAsNumber(input['chainId']) ?? valueAsNumber(input['chain_id']),
     txCommit: valueAsString(input['txCommit']) ?? valueAsString(input['tx_commit']),

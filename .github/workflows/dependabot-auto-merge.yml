@@ -5,10 +5,12 @@ on: pull_request
 permissions:
   contents: write
   pull-requests: write
+  statuses: read
 
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.actor == 'dependabot[bot]'
     steps:
       - name: Fetch Dependabot metadata
@@ -16,6 +18,70 @@ jobs:
         uses: dependabot/fetch-metadata@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Request exact-head CodeRabbit review
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr comment "$PR_URL" --body '@coderabbitai review'
+
+      - name: Wait for exact-head CodeRabbit completion
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 900))
+
+          while (( SECONDS < deadline )); do
+            statuses="$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/statuses?per_page=100")"
+            pending_at="$(
+              jq -r '
+                [.[] | select(.context == "CodeRabbit" and .state == "pending")]
+                | sort_by(.created_at)
+                | last
+                | .created_at // empty
+              ' <<< "${statuses}"
+            )"
+
+            if [[ -n "${pending_at}" ]]; then
+              terminal_state="$(
+                jq -r --arg pending_at "${pending_at}" '
+                  [.[] |
+                    select(
+                      .context == "CodeRabbit" and
+                      .created_at > $pending_at and
+                      (.state == "success" or .state == "failure" or .state == "error")
+                    )
+                  ]
+                  | sort_by(.created_at)
+                  | last
+                  | .state // empty
+                ' <<< "${statuses}"
+              )"
+
+              if [[ "${terminal_state}" == "success" ]]; then
+                exit 0
+              fi
+              if [[ "${terminal_state}" == "failure" || "${terminal_state}" == "error" ]]; then
+                echo "CodeRabbit review failed for exact head ${HEAD_SHA}" >&2
+                exit 1
+              fi
+            fi
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for an exact-head CodeRabbit review" >&2
+          exit 1
 
       # Enable auto-merge only for patch/minor updates.
       # Major version bumps and security-fix PRs that cross majors
