@@ -135,6 +135,25 @@ describe('intentFromToolInput — EVM amount contract', () => {
     expect(intent.amount).toBe('1000000000000000000');
   });
 
+  it('uses a method amount for contract.call when value is absent', () => {
+    const intent = intentFromToolInput('contract.call', {
+      amount: '5000000',
+      chainId: 1,
+      to: USDC,
+    });
+    expect(intent.amount).toBe('5000000');
+  });
+
+  it('keeps amount precedence for wallet.transfer when both fields are present', () => {
+    const intent = intentFromToolInput('wallet.transfer', {
+      amount: '1.5',
+      value: '0xde0b6b3a7640000',
+      chainId: 1,
+      to: RECIPIENT,
+    });
+    expect(intent.amount).toBe('1.5');
+  });
+
   it('fails closed when contract.call value is malformed even if amount is valid', () => {
     const intent = intentFromToolInput('contract.call', {
       amount: '5000000',
