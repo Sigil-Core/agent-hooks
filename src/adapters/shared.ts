@@ -142,10 +142,10 @@ function resolveEvmCalldata(input: Record<string, unknown>): string | undefined 
 }
 
 /** A supplied amount/value as a canonical decimal string. */
-function resolveSuppliedEvmAmount(
+const resolveSuppliedEvmAmount = (
   action: string,
   input: Record<string, unknown>,
-): string | undefined {
+): string | undefined => {
   if (action === 'contract.call') {
     if (Object.prototype.hasOwnProperty.call(input, 'value')) {
       return valueAsAmount(input['value']);
@@ -156,7 +156,7 @@ function resolveSuppliedEvmAmount(
     return valueAsAmount(input['amount']);
   }
   return valueAsAmount(input['value']);
-}
+};
 
 /**
  * EVM intents always carry an amount when the tool input can prove one.
@@ -168,14 +168,14 @@ function resolveSuppliedEvmAmount(
  *   carry native value, and inventing "0" would let an unknown-value call
  *   pass under the cap. Sign denies it.
  */
-function resolveEvmAmount(
+const resolveEvmAmount = (
   action: string,
   input: Record<string, unknown>,
-): string | undefined {
+): string | undefined => {
   const supplied = resolveSuppliedEvmAmount(action, input);
   if (supplied !== undefined) return supplied;
   return undefined;
-}
+};
 
 export function intentFromToolInput(
   action: string,
