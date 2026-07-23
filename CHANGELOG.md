@@ -2,6 +2,42 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-07-20
+
+### Fixed
+
+- Native EVM value precedence now depends on the intent action. For `contract.call`, an explicit `value` key takes precedence (native value attached to the call) and falls back to `amount`; for other EVM actions such as `wallet.transfer`, `amount` takes precedence and falls back to `value`. Previously `amount` always won, which could mask a contract call's native `value`. `resolveEvmAmount` / `resolveSuppliedEvmAmount` now receive the resolved action.
+
+## [0.5.1] - 2026-07-19
+
+### Added
+
+- EVM intents always carry an amount when the tool input can prove one: a supplied `amount`/`value` passes through verbatim (finite numbers stringified); a `contract.call` with neither key emits `amount: "0"` because its schema provably moves no native value; a `wallet.transfer` with no amount is left absent on purpose so Sigil Sign denies it with `LEX_AMOUNT_REQUIRED` instead of treating an unknown value under the cap as zero.
+- `decodeErc20Calldata` shim (`src/evm-calldata.ts`): decodes the 4-byte selector for the ERC-20 set (`transfer`, `transferFrom`, `approve`, `increaseAllowance`, `permit`) and emits `metadata.evm` (`selector`, `token_target`, `spender`/`recipient`, `token_amount` in base units) on `contract.call` intents. Unknown selectors emit selector-only metadata so a strict policy can deny them; partial decodes never emit guessed values.
+- `SigilIntent.calldata` — decoded EVM calldata passed through on the `/v1/authorize` request body.
+
+### Fixed
+
+- EVM calldata is bound and validated before it is emitted.
+- Contract-call action aliases are normalized to the canonical `contract.call` action.
+- Adapters fail closed on unproven EVM value rather than passing an unknown amount under the policy cap.
+
+### Known limitations
+
+- Out of scope for this release: proxy contracts, multicall unwrapping, and non-ERC-20 token standards.
+
+## [0.5.0] - 2026-07-10
+
+### Added
+
+- Typed HTTP intent profile: adapters emit `action: "http"` only when a known HTTP/web tool input carries an explicit uppercase method (`GET`, `HEAD`, `OPTIONS`, `POST`, `PUT`, `PATCH`, `DELETE`). New `HTTP_METHODS` constant and `HttpMethod` / `SigilHttpMethod` exported types.
+- `SigilIntent.method?: HttpMethod` — set on typed `http` intents only; adapters never infer `GET`. `SigilIntent.url` now applies to both `web_fetch` and `http`.
+- README "Typed HTTP intents" section documenting the per-adapter method-extraction surface.
+
+### Changed
+
+- Methodless web calls continue to use the legacy `web_fetch` action, so existing policies remain compatible. An explicit non-empty method outside the supported set still selects the typed `http` profile but omits the invalid method from the wire intent, so Sigil Sign rejects the incomplete typed request instead of silently downgrading it to an untyped fetch.
+
 ## [0.4.0] - 2026-07-07
 
 ### Added
