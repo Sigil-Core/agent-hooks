@@ -69,6 +69,9 @@ const throwInvalidAuthorizationResponse = (): never => {
   throw new Error('sigil_response_invalid_authorization');
 };
 
+const hasValidPendingHold = (data: Record<string, unknown>): boolean =>
+  data['status'] !== 'PENDING' || getHoldId(data) !== undefined;
+
 const resolveAuthorizationData = (
   data: Record<string, unknown>,
 ): AuthorizationHttpResult => {
@@ -79,7 +82,7 @@ const resolveAuthorizationData = (
   if (!hasValidOptionalStringFields(data)) {
     return throwInvalidAuthorizationResponse();
   }
-  if (data['status'] === 'PENDING' && getHoldId(data) === undefined) {
+  if (!hasValidPendingHold(data)) {
     return throwInvalidAuthorizationResponse();
   }
   return { data };
