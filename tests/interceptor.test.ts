@@ -142,6 +142,7 @@ describe('checkIntent', () => {
     ['a null response body', null],
     ['a pending response without a hold ID', { status: 'PENDING' }],
     ['an unknown response status', { status: 'UNKNOWN' }],
+    ['a non-string policy hash', { status: 'APPROVED', policyHash: 7 }],
   ])('routes %s through the configured fail mode', async (_label, body) => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify(body), {
@@ -150,7 +151,7 @@ describe('checkIntent', () => {
       }),
     );
     const onPending = vi.fn();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     const result = await checkIntent(
       { action: 'bash', command: 'echo hello' },
@@ -161,6 +162,58 @@ describe('checkIntent', () => {
     expect(result.errorCode).toBe(SIGIL_UNREACHABLE);
     expect(onPending).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  it('does not route local serialization errors through fail-open handling', async () => {
+    const intent: SigilIntent = {
+      action: 'bash',
+      command: 'echo hello',
+      metadata: { unsupported: 1n },
+    };
+
+    await expect(checkIntent(intent, BASE_CONFIG)).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('preserves an explicit denial with null optional response fields', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        status: 'DENIED',
+        error_code: 'SIGIL_BASH_BLOCKED',
+        message: 'blocked',
+        hold_id: null,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const result = await checkIntent(
+      { action: 'bash', command: 'rm -rf /' },
+      BASE_CONFIG,
+    );
+
+    expect(result.decision).toBe('DENIED');
+    expect(result.errorCode).toBe('SIGIL_BASH_BLOCKED');
+    expect(result.failOpen).toBeUndefined();
+  });
+
+  it('routes malformed pending responses through open mode', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'PENDING', hold_id: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const result = await checkIntent(
+      { action: 'bash', command: 'echo hello' },
+      BASE_CONFIG,
+    );
+
+    expect(result.decision).toBe('APPROVED');
+    expect(result.errorCode).toBeUndefined();
+    expect(result.failOpen).toBe(true);
   });
 
   it('returns an authentication failure for a 403 without a policy decision', async () => {

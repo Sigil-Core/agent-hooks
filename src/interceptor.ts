@@ -22,6 +22,19 @@ const authenticationFailure = (status: number): SigilHookResult => ({
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const getString = (value: unknown): string | undefined =>
+  typeof value === 'string' ? value : undefined;
+
+const OPTIONAL_STRING_FIELDS = [
+  'policyHash',
+  'policy_hash',
+  'holdId',
+  'hold_id',
+  'message',
+  'error_code',
+  'errorCode',
+] as const;
+
 const parseResponseData = async (
   response: Response,
 ): Promise<Record<string, unknown> | undefined> => {
@@ -35,27 +48,51 @@ const parseResponseData = async (
 
 const getHoldId = (data: Record<string, unknown>): string | undefined => {
   const value = data['holdId'] ?? data['hold_id'];
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
+  const holdId = getString(value);
+  return holdId !== undefined && holdId.length > 0 ? holdId : undefined;
 };
 
-const validateAuthorizationData = (
+const hasValidAuthorizationStatus = (status: unknown): boolean =>
+  status === 'APPROVED' || status === 'DENIED' || status === 'PENDING';
+
+const hasValidOptionalStringFields = (
   data: Record<string, unknown>,
-): void => {
-  const status = data['status'];
-  if (status !== 'APPROVED' && status !== 'DENIED' && status !== 'PENDING') {
-    throw new Error('sigil_response_invalid_status');
+): boolean =>
+  OPTIONAL_STRING_FIELDS.every(
+    (field) =>
+      data[field] === undefined ||
+      data[field] === null ||
+      getString(data[field]) !== undefined,
+  );
+
+const throwInvalidAuthorizationResponse = (): never => {
+  throw new Error('sigil_response_invalid_authorization');
+};
+
+const resolveAuthorizationData = (
+  data: Record<string, unknown>,
+): AuthorizationHttpResult => {
+  if (data['status'] === 'DENIED') return { data };
+  if (!hasValidAuthorizationStatus(data['status'])) {
+    return throwInvalidAuthorizationResponse();
   }
-  if (status === 'PENDING' && getHoldId(data) === undefined) {
-    throw new Error('sigil_response_invalid_hold_id');
+  if (!hasValidOptionalStringFields(data)) {
+    return throwInvalidAuthorizationResponse();
   }
+  if (data['status'] === 'PENDING' && getHoldId(data) === undefined) {
+    return throwInvalidAuthorizationResponse();
+  }
+  return { data };
 };
 
 const resolveForbiddenResponse = (
   data: Record<string, unknown> | undefined,
-): AuthorizationHttpResult =>
-  data?.['status'] === 'DENIED'
-    ? { data }
-    : { result: authenticationFailure(403) };
+): AuthorizationHttpResult => {
+  if (data?.['status'] !== 'DENIED') {
+    return { result: authenticationFailure(403) };
+  }
+  return resolveAuthorizationData(data);
+};
 
 const resolveHttpResponse = async (
   response: Response,
@@ -69,8 +106,7 @@ const resolveHttpResponse = async (
   const data = await parseResponseData(response);
   if (response.status === 403) return resolveForbiddenResponse(data);
   if (data === undefined) throw new Error('sigil_response_invalid_json');
-  validateAuthorizationData(data);
-  return { data };
+  return resolveAuthorizationData(data);
 };
 
 const handleRequestError = (
@@ -106,6 +142,7 @@ const requestAuthorization = async (
   config: SigilHookConfig,
 ): Promise<AuthorizationHttpResult> => {
   const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
+  const body = serializeAuthorizeRequestBody(intent, config);
   const timeoutMs = config.requestTimeoutMs ?? 10_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -116,7 +153,7 @@ const requestAuthorization = async (
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${config.apiKey}`,
       },
-      body: serializeAuthorizeRequestBody(intent, config),
+      body,
       signal: controller.signal,
     });
     return await resolveHttpResponse(response);
@@ -131,8 +168,7 @@ const requestAuthorization = async (
 const getPolicyHash = (
   data: Record<string, unknown>,
 ): string | undefined =>
-  (data['policyHash'] as string | undefined)
-  ?? (data['policy_hash'] as string | undefined);
+  getString(data['policyHash']) ?? getString(data['policy_hash']);
 
 const approvedResult = (
   data: Record<string, unknown>,
@@ -152,7 +188,7 @@ const pendingResult = (
     decision: 'PENDING',
     holdId,
     policyHash: getPolicyHash(data),
-    message: data['message'] as string | undefined,
+    message: getString(data['message']),
   };
 };
 
@@ -176,10 +212,10 @@ const deniedResult = (
   config: SigilHookConfig,
 ): SigilHookResult => {
   const taskId = resolveTaskId(intent, config);
-  const errorCode = ((data['error_code'] as string | undefined)
-    ?? (data['errorCode'] as string | undefined)
+  const errorCode = (getString(data['error_code'])
+    ?? getString(data['errorCode'])
     ?? 'SIGIL_POLICY_VIOLATION');
-  const baseMessage = (data['message'] as string) ?? 'Action blocked by policy';
+  const baseMessage = getString(data['message']) ?? 'Action blocked by policy';
   const message = denialMessage(errorCode, baseMessage, taskId);
   config.onDenied?.(intent, message);
   return {
