@@ -1,6 +1,7 @@
 // tests/interceptor.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { checkIntent } from '../src/interceptor.js';
+import { SIGIL_UNREACHABLE } from '../src/types.js';
 import type { SigilHookConfig, SigilIntent } from '../src/types.js';
 
 const BASE_CONFIG: SigilHookConfig = {
@@ -134,6 +135,31 @@ describe('checkIntent', () => {
     expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
     expect(warnSpy).toHaveBeenCalled();
 
+    warnSpy.mockRestore();
+  });
+
+  it.each([
+    ['a null response body', null],
+    ['a pending response without a hold ID', { status: 'PENDING' }],
+    ['an unknown response status', { status: 'UNKNOWN' }],
+  ])('routes %s through the configured fail mode', async (_label, body) => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const onPending = vi.fn();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await checkIntent(
+      { action: 'bash', command: 'echo hello' },
+      { ...BASE_CONFIG, failMode: 'closed', onPending },
+    );
+
+    expect(result.decision).toBe('DENIED');
+    expect(result.errorCode).toBe(SIGIL_UNREACHABLE);
+    expect(onPending).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 
