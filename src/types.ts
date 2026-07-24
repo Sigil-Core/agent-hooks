@@ -58,7 +58,7 @@ export interface SigilIntent {
   method?: HttpMethod;     // typed http only; adapters never infer GET
   path?: string;           // file_write only
   to?: string;             // wallet.transfer only
-  amount?: string;         // EVM actions — wei as string; "0" for zero-value calls
+  amount?: string;         // EVM actions — native value in base units as a string; absent when no amount is proven (Sign fails closed)
   calldata?: string;       // contract.call only — raw 0x-prefixed calldata
   txCommit?: string;       // EVM: SHA-256 hex of the raw tx, no 0x prefix
   taskId?: string;         // Stable task/session id for hard loop ceilings

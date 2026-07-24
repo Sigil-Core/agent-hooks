@@ -184,6 +184,59 @@ The method-bearing extraction surface is intentionally narrow:
 For high-stakes actions, keep `failMode: "closed"` so a Sign validation or
 connectivity failure cannot release the underlying tool call.
 
+## ERC-20 calldata enrichment
+
+For `contract.call` intents, a trusted shim (`decodeErc20Calldata`,
+[`src/evm-calldata.ts`](./src/evm-calldata.ts)) decodes the 4-byte selector and,
+for the ERC-20 set, attaches the decoded values as `metadata.evm` so a token cap
+can bind to what the calldata already claims. The decode never widens authority —
+it only exposes the call's own arguments — and Sigil Sign trusts `metadata.evm`
+only on shim-provenance submissions: any caller-supplied `evm` key is stripped
+before the shim's decode is merged.
+
+| Selector | Function | Decoded fields (besides `selector` + `token_target`) |
+|---|---|---|
+| `0xa9059cbb` | `transfer(address,uint256)` | `recipient`, `token_amount` |
+| `0x23b872dd` | `transferFrom(address,address,uint256)` | `recipient`, `token_amount` |
+| `0x095ea7b3` | `approve(address,uint256)` | `spender`, `token_amount` |
+| `0x39509351` | `increaseAllowance(address,uint256)` | `spender`, `token_amount` |
+| `0xd505accf` | `permit(address,address,uint256,...)` | `spender`, `token_amount` |
+
+`token_target` is the call's `to` / `targetAddress`; `token_amount` is emitted in
+base units as a decimal string. A selector outside this set emits selector-only
+metadata (`{ selector }`) so a strict policy can deny it, and a partial decode
+(any argument word that does not decode cleanly) collapses to selector-only as
+well — the shim never emits a guessed value. The raw calldata is also passed
+through as `SigilIntent.calldata` (normalized to lowercase, even-length,
+`0x`-prefixed hex) on the `/v1/authorize` body, where Sign binds and validates it
+before use.
+
+Out of scope by design (documented residuals): proxy contracts, multicall
+unwrapping, and non-ERC-20 token standards.
+
+### EVM native-value precedence
+
+An EVM intent carries `amount` only when the tool input can prove one. The field
+that wins depends on the action:
+
+- **`contract.call`** — an explicit `value` (native value attached to the call)
+  takes precedence and falls back to `amount`.
+- **`wallet.transfer`** and other EVM actions — `amount` takes precedence and
+  falls back to `value`.
+
+Supplied amounts pass through verbatim: canonical decimal strings are kept,
+non-negative safe-integer numbers are stringified, and JSON-RPC hex quantities
+(`0x0`, `0xde0b6b3a7640000`) are converted exactly to their decimal base-unit
+value. Negative, fractional, exponent, or unsafe-integer representations are
+rejected.
+
+When the higher-precedence field is missing or malformed, `amount` is left absent
+**on purpose** — the adapter never invents `"0"`, because it cannot prove that an
+alternate field (e.g. `valueWei`, `tx.value`) is not carrying native value. Sigil
+Sign then denies the intent with `LEX_AMOUNT_REQUIRED` under Policy 2.1 (and under
+the `SIGIL_EVM_AMOUNT_REQUIRED` deployment flag for legacy policies) rather than
+letting an unknown value pass under the cap.
+
 ## Model Budget Brakes
 
 Execution Limits v2 model budgets are enforced through cumulative
