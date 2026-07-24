@@ -12,7 +12,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added
 
-- EVM intents always carry an amount when the tool input can prove one: a supplied `amount`/`value` passes through verbatim (finite numbers stringified); a `contract.call` with neither key emits `amount: "0"` because its schema provably moves no native value; a `wallet.transfer` with no amount is left absent on purpose so Sigil Sign denies it with `LEX_AMOUNT_REQUIRED` instead of treating an unknown value under the cap as zero.
+- EVM intents carry an amount only when the tool input can prove one: a supplied `amount`/`value` passes through verbatim (finite numbers stringified); an EVM action with neither key — a `contract.call` or a `wallet.transfer` — is left absent on purpose, because the adapter cannot prove that an alternate field such as `valueWei` or `tx.value` is not carrying native value and inventing `"0"` would let an unknown value pass under the cap. Sigil Sign then denies it with `LEX_AMOUNT_REQUIRED` instead of treating an unknown value under the cap as zero.
 - `decodeErc20Calldata` shim (`src/evm-calldata.ts`): decodes the 4-byte selector for the ERC-20 set (`transfer`, `transferFrom`, `approve`, `increaseAllowance`, `permit`) and emits `metadata.evm` (`selector`, `token_target`, `spender`/`recipient`, `token_amount` in base units) on `contract.call` intents. Unknown selectors emit selector-only metadata so a strict policy can deny them; partial decodes never emit guessed values.
 - `SigilIntent.calldata` — decoded EVM calldata passed through on the `/v1/authorize` request body.
 
