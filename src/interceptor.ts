@@ -22,6 +22,7 @@ export async function checkIntent(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   let data: Record<string, unknown>;
+  let responseStatus: number | undefined;
   try {
     const response = await fetch(`${apiUrl}/v1/authorize`, {
       method: 'POST',
@@ -32,6 +33,7 @@ export async function checkIntent(
       body,
       signal: controller.signal,
     });
+    responseStatus = response.status;
     if (response.status === 401) {
       return { decision: 'DENIED', errorCode: 'SIGIL_AUTH_FAILURE', message: `Authentication failed (${response.status})` };
     }
@@ -39,7 +41,21 @@ export async function checkIntent(
       throw new Error(`sigil_server_${response.status}`);
     }
     data = await response.json() as Record<string, unknown>;
+    if (responseStatus === 403 && data['status'] !== 'DENIED') {
+      return {
+        decision: 'DENIED',
+        errorCode: 'SIGIL_AUTH_FAILURE',
+        message: `Authentication failed (${responseStatus})`,
+      };
+    }
   } catch (err: unknown) {
+    if (responseStatus === 403) {
+      return {
+        decision: 'DENIED',
+        errorCode: 'SIGIL_AUTH_FAILURE',
+        message: `Authentication failed (${responseStatus})`,
+      };
+    }
     const error = err instanceof Error ? err : new Error(String(err));
     config.onError?.(intent, error);
     const failMode = config.failMode ?? 'open';

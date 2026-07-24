@@ -137,6 +137,67 @@ describe('checkIntent', () => {
     warnSpy.mockRestore();
   });
 
+  it('returns an authentication failure for a 403 without a policy decision', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'Forbidden API key' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const result = await checkIntent(
+      { action: 'bash', command: 'echo hello' },
+      BASE_CONFIG,
+    );
+
+    expect(result).toEqual({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_AUTH_FAILURE',
+      message: 'Authentication failed (403)',
+    });
+  });
+
+  it('returns an authentication failure for a non-JSON 403 response', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response('<html>Forbidden</html>', {
+        status: 403,
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    );
+
+    const result = await checkIntent(
+      { action: 'bash', command: 'echo hello' },
+      BASE_CONFIG,
+    );
+
+    expect(result).toEqual({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_AUTH_FAILURE',
+      message: 'Authentication failed (403)',
+    });
+  });
+
+  it('preserves an explicit policy denial returned with HTTP 403', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'DENIED',
+          error_code: 'SIGIL_BASH_BLOCKED',
+          message: 'Command blocked by policy',
+        }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await checkIntent(
+      { action: 'bash', command: 'rm -rf /' },
+      BASE_CONFIG,
+    );
+
+    expect(result.decision).toBe('DENIED');
+    expect(result.errorCode).toBe('SIGIL_BASH_BLOCKED');
+  });
+
   it('preserves policyHash on DENIED result', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(
