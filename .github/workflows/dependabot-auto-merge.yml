@@ -4,8 +4,9 @@ on: pull_request
 
 permissions:
   contents: write
+  checks: read
+  issues: read
   pull-requests: write
-  statuses: read
 
 jobs:
   auto-merge:
@@ -19,21 +20,13 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Request exact-head CodeRabbit review
+      - name: Wait for one qualifying completed review
         if: |
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
           steps.metadata.outputs.update-type == 'version-update:semver-minor'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr comment "$PR_URL" --body '@coderabbitai review'
-
-      - name: Wait for exact-head CodeRabbit completion
-        if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
@@ -42,45 +35,32 @@ jobs:
           deadline=$((SECONDS + 900))
 
           while (( SECONDS < deadline )); do
-            statuses="$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/statuses?per_page=100")"
-            pending_at="$(
-              jq -r '
-                [.[] | select(.context == "CodeRabbit" and .state == "pending")]
-                | sort_by(.created_at)
-                | last
-                | .created_at // empty
-              ' <<< "${statuses}"
-            )"
+            reviews="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100")"
+            comments="$(gh api "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100")"
+            checks="$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/check-runs?per_page=100")"
 
-            if [[ -n "${pending_at}" ]]; then
-              terminal_state="$(
-                jq -r --arg pending_at "${pending_at}" '
-                  [.[] |
-                    select(
-                      .context == "CodeRabbit" and
-                      .created_at > $pending_at and
-                      (.state == "success" or .state == "failure" or .state == "error")
-                    )
-                  ]
-                  | sort_by(.created_at)
-                  | last
-                  | .state // empty
-                ' <<< "${statuses}"
-              )"
+            github_review="$(jq -r 'any(.[]; .state == "APPROVED" or .state == "COMMENTED")' <<< "${reviews}")"
+            coderabbit_review="$(jq -r 'any(.[]; (.user.login | ascii_downcase | contains("coderabbit")) and (.body | ascii_downcase | contains("no actionable comments")))' <<< "${comments}")"
+            fallback_review="$(jq -r 'any(.[]; .user.login == "dacoldest" and (.body | test("<!--[[:space:]]*sigil-review-fallback[[:space:]]+sha=[0-9a-f]{40}[[:space:]]+verdict=verified[[:space:]]*-->"; "i")))' <<< "${comments}")"
+            codex_review="$(jq -r '
+              [.[] | select(.user.login == "dacoldest" and (.body | ascii_downcase | gsub("^[[:space:]]+|[[:space:]]+$"; "") == "@codex review")) | .[].created_at] as $requests
+              | any(.[];
+                  (.user.login | ascii_downcase | contains("codex")) and
+                  (.body | startswith("Codex Review:")) and
+                  (.created_at as $response_time | any($requests[]; . < $response_time))
+                )
+            ' <<< "${comments}")"
+            deepsource_review="$(jq -r 'any(.check_runs[]?; (.name | ascii_downcase | contains("deepsource")) and .status == "completed" and .conclusion == "success")' <<< "${checks}")"
 
-              if [[ "${terminal_state}" == "success" ]]; then
-                exit 0
-              fi
-              if [[ "${terminal_state}" == "failure" || "${terminal_state}" == "error" ]]; then
-                echo "CodeRabbit review failed for exact head ${HEAD_SHA}" >&2
-                exit 1
-              fi
+            if [[ "${github_review}" == true || "${coderabbit_review}" == true || "${fallback_review}" == true || "${codex_review}" == true || "${deepsource_review}" == true ]]; then
+              echo "Found one qualifying completed review; no additional reviewer will run."
+              exit 0
             fi
 
             sleep 10
           done
 
-          echo "Timed out waiting for an exact-head CodeRabbit review" >&2
+          echo "Timed out waiting for one qualifying completed review; automatic merge remains disabled." >&2
           exit 1
 
       # Enable auto-merge only for patch/minor updates.
