@@ -1,8 +1,12 @@
 # .coderabbit.yaml — agent-hooks (TypeScript, npm library)
+#
+# Auto-review is off: local handoff-review is the review of record before a
+# PR opens. CodeRabbit remains available for explicit on-demand reviews, and
+# the path instructions below still apply to those requests.
 
 reviews:
   auto_review:
-    enabled: true
+    enabled: false
 
   path_instructions:
     - path: "src/**/*.ts"
