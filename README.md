@@ -83,7 +83,7 @@ const sigilHandler = createOpenclawSigilHandler({
 plugin.api.on('before_tool_call', sigilHandler);
 ```
 
-Sigil `DENIED` decisions (including `SIGIL_UNREACHABLE` in closed mode) surface as OpenClaw tool blocks with the rejection reason. Sigil `PENDING` decisions also surface as blocks — with `SIGIL_CONSENSUS_HOLD_REQUIRED` and the `hold_id` included in `blockReason` — so a hold can only be resolved out of band through Sigil Command. The adapter deliberately does **not** surface `PENDING` through OpenClaw's local approval UI, because local approval would let a host user run the tool without the Sigil hold ever being resolved, bypassing enforcement.
+Sigil `DENIED` decisions (including `SIGIL_UNREACHABLE` in closed mode) surface as OpenClaw tool blocks with the rejection reason. Sigil `PENDING` decisions also surface as blocks with `SIGIL_CONSENSUS_HOLD_REQUIRED` and the `hold_id` in `blockReason`. A pending decision is not authorization: the current task must not retry or execute it. If Sign supports a Class 3 resolution for the hold, an authenticated out-of-band operator decision may permit only an exact-intent reauthorization; any resulting attestation is a new, separate authorization. The adapter deliberately does **not** surface `PENDING` through OpenClaw's local approval UI, because local approval would let a host user run the tool without a Sign authorization.
 
 ## Works With AgentPay (WLFI)
 
@@ -296,7 +296,7 @@ For held actions:
   "sigil_hold_id": "hold_abc123",
   "sigil_policy_hash": "abc123def456",
   "sigil_action_taken": "pending_approval",
-  "sigil_next_steps": "This action has been paused for human review. Do not retry. Notify the operator via Sigil Command."
+  "sigil_next_steps": "This action is not authorized. Do not retry or execute it. Notify an authenticated operator through the configured out-of-band review path. Only a supported exact-intent reauthorization may proceed with a new attestation."
 }
 ```
 
