@@ -1,0 +1,8 @@
+{
+  "name": "string_lone_surrogate",
+  "input": {
+    "a": "\ud800"
+  },
+  "expectError": true,
+  "reason": "lone surrogate collides under UTF-8"
+}

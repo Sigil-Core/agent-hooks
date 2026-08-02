@@ -195,12 +195,29 @@ export type CoworkToolClassification =
  * `url` is the WebFetch class, and anything else is generic MCP passthrough.
  * Everything unmatched is unclassified and denies.
  */
+// Exact tool_input key sets a real built-in class arrives with on the Cowork
+// host (Phase A capture, 2026-08-02): Bash is exactly {command}; WebFetch is
+// {url} plus an optional {method}. A shape match requires the key set to be a
+// SUBSET of these, so a model-authored extra key (e.g. a smuggled `path`)
+// cannot reroute an opaque MCP tool into the bash or web_fetch policy class.
+const BASH_SHAPE_KEYS = new Set(['command']);
+const WEBFETCH_SHAPE_KEYS = new Set(['url', 'method']);
+
+const keysSubsetOf = (
+  input: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+): boolean => Object.keys(input).every((key) => allowed.has(key));
+
 export function classifyCoworkTool(
   toolName: string,
   toolInput: Record<string, unknown>,
 ): CoworkToolClassification {
-  const entry = COWORK_GOVERNED_TOOLS.tools[toolName];
-  if (entry !== undefined) {
+  // Object.hasOwn guards against prototype-chain names (__proto__, constructor,
+  // toString, hasOwnProperty): a bare bracket lookup would classify them as
+  // governed with action undefined and then throw. They must fall to
+  // unclassified and deny.
+  if (Object.hasOwn(COWORK_GOVERNED_TOOLS.tools, toolName)) {
+    const entry = COWORK_GOVERNED_TOOLS.tools[toolName] as CoworkToolInventoryEntry;
     if (entry.classification === 'excluded') return { classification: 'excluded' };
     return {
       classification: 'governed',
@@ -209,10 +226,12 @@ export function classifyCoworkTool(
     };
   }
   if (OPAQUE_COWORK_TOOL_PATTERN.test(toolName)) {
-    if (typeof toolInput['command'] === 'string') {
+    // Shape classification requires the ENTIRE key set to match the class, not
+    // just the presence of one field, so {command, path} is not Bash.
+    if (typeof toolInput['command'] === 'string' && keysSubsetOf(toolInput, BASH_SHAPE_KEYS)) {
       return { classification: 'governed', toolClass: 'Bash', action: 'bash' };
     }
-    if (typeof toolInput['url'] === 'string') {
+    if (typeof toolInput['url'] === 'string' && keysSubsetOf(toolInput, WEBFETCH_SHAPE_KEYS)) {
       return { classification: 'governed', toolClass: 'WebFetch', action: 'web_fetch' };
     }
     return {
@@ -297,13 +316,15 @@ export function projectArguments(
   raw: Record<string, unknown>,
 ): CoworkProjectionResult {
   if (toolClass === 'mcp') return projectMcpArguments(toolName, raw);
-  const fields = PROJECTION_FIELDS[toolClass];
-  if (fields === undefined) {
+  // Object.hasOwn guards against a prototype-chain toolClass; a bare lookup
+  // would yield a non-array and throw "fields is not iterable".
+  if (!Object.hasOwn(PROJECTION_FIELDS, toolClass)) {
     return malformedProjection(`No projection is defined for tool class ${toolClass}.`);
   }
+  const fields = PROJECTION_FIELDS[toolClass] as ReadonlyArray<readonly [string, number]>;
   const args: Record<string, unknown> = {};
   for (const [field, cap] of fields) {
-    if (!(field in raw)) continue;
+    if (!Object.hasOwn(raw, field)) continue;
     const value = raw[field];
     if (value === undefined || value === null) continue;
     if (
@@ -366,6 +387,19 @@ class CanonError extends Error {}
 
 const utf8 = (text: string): Buffer => Buffer.from(text, 'utf8');
 
+/**
+ * True when the string contains no lone surrogate. Uses String.isWellFormed
+ * (Node 20+) when present, with a portable regex fallback so the check does
+ * not depend on the ES2024 lib typings.
+ */
+function isWellFormedString(value: string): boolean {
+  const withNativeCheck = value as string & { isWellFormed?: () => boolean };
+  if (typeof withNativeCheck.isWellFormed === 'function') {
+    return withNativeCheck.isWellFormed();
+  }
+  return !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value);
+}
+
 function encodeCanonical(value: unknown, depth: number, out: Buffer[]): void {
   if (depth > CANON_MAX_DEPTH) {
     throw new CanonError(`Nesting depth exceeds the bound of ${CANON_MAX_DEPTH}.`);
@@ -397,6 +431,13 @@ function encodeCanonical(value: unknown, depth: number, out: Buffer[]): void {
     return;
   }
   if (typeof value === 'string') {
+    // Reject lone surrogates: Buffer.from(...,'utf8') maps every unpaired
+    // surrogate to U+FFFD, so '\ud800' and '\ud801' would otherwise collide on
+    // one digest. Rejection (not a substitution) preserves binding integrity
+    // without a canon version bump.
+    if (!isWellFormedString(value)) {
+      throw new CanonError('String is not well-formed (contains a lone surrogate).');
+    }
     const normalized = value.normalize('NFC');
     const bytes = utf8(normalized);
     out.push(utf8(`s${bytes.byteLength}:`), bytes, utf8(';'));

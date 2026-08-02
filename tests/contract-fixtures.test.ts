@@ -89,7 +89,7 @@ const COWORK_FIXTURE_PAYLOAD = {
   effort: { level: 'medium' },
   hook_event_name: 'PreToolUse',
   tool_name: 'mcp__aaaaaaaaaaaa',
-  tool_input: { command: 'ls -la' },
+  tool_input: { command: 'CANARY_COMMAND_01' },
   tool_use_id: 'toolu_fixture_1',
 };
 

@@ -188,18 +188,29 @@ credential, malformed input, protocol-invalid response, unclassified tool —
 blocks rather than proceeds. Only a strictly schema-valid explicit `APPROVED`
 response can approve.
 
-Governed-tool inventory (from `COWORK_TOOL_MANIFEST`):
+Governed-tool inventory, rendered from `COWORK_TOOL_MANIFEST` (the single
+source; a drift test fails the build if this block and the manifest disagree):
 
+<!-- COWORK_TOOL_TABLE:START -->
 | Cowork tool | Classification | Sigil action |
 |---|---|---|
 | `Bash` | governed | `bash` |
-| `Edit`, `Write` | governed | `file_write` |
-| `Read`, `Glob`, `Grep` | governed | `file_read` |
+| `Edit` | governed | `file_write` |
+| `Write` | governed | `file_write` |
+| `Read` | governed | `file_read` |
+| `Glob` | governed | `file_read` |
+| `Grep` | governed | `file_read` |
 | `Agent` | governed | `agent_spawn` |
-| `WebFetch`, `WebSearch` | governed | `web_fetch` (promoted to `http` with an explicit method) |
-| `mcp__<server>__<tool>` | governed | literal passthrough |
-| `AskUserQuestion`, `ExitPlanMode` | excluded | none (no external effect; returned before any network call) |
-| anything else | unclassified | denied with `SIGIL_TOOL_UNCLASSIFIED` |
+| `WebFetch` | governed | `web_fetch` |
+| `WebSearch` | governed | `web_fetch` |
+| `AskUserQuestion` | excluded | — |
+| `ExitPlanMode` | excluded | — |
+<!-- COWORK_TOOL_TABLE:END -->
+
+`WebFetch`/`WebSearch` are promoted to the `http` action when the input carries
+an explicit method. Beyond the inventory: `mcp__<server>__<tool>` names are
+governed MCP passthrough, and anything unmatched is denied with
+`SIGIL_TOOL_UNCLASSIFIED`.
 
 On the real Cowork host, built-in classes arrive under opaque per-tool names
 (`mcp__<12-hex>`; the 2026-08-02 Phase A capture recorded Bash as

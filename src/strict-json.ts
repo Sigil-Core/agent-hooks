@@ -136,6 +136,19 @@ class StrictParseError extends Error {
 
 const WHITESPACE = new Set([' ', '\t', '\n', '\r']);
 
+/**
+ * True when the string contains no lone surrogate. Uses String.isWellFormed
+ * (Node 20+) when present, with a portable regex fallback so the check does
+ * not depend on the ES2024 lib typings.
+ */
+function isWellFormedString(value: string): boolean {
+  const withNativeCheck = value as string & { isWellFormed?: () => boolean };
+  if (typeof withNativeCheck.isWellFormed === 'function') {
+    return withNativeCheck.isWellFormed();
+  }
+  return !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value);
+}
+
 class StrictParser {
   private pos = 0;
 
@@ -277,6 +290,12 @@ class StrictParser {
       if (ch === undefined) throw this.syntax('Unterminated string.');
       if (ch === '"') {
         this.pos += 1;
+        // Reject lone surrogates (reachable through \uD800-style escapes). A
+        // lone surrogate would collide with others under UTF-8 canonicalization
+        // downstream, so it is rejected as malformed rather than admitted.
+        if (!isWellFormedString(out)) {
+          throw this.syntax('String contains a lone surrogate.');
+        }
         return out;
       }
       if (ch === '\\') {

@@ -354,8 +354,9 @@ const requestAuthorization = async (
     if (externalSignal.aborted) controller.abort();
     else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
   }
+  const strict = config.strictResponse === true;
   try {
-    const response = await fetch(`${apiUrl}/v1/authorize`, {
+    const requestInit: RequestInit = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -363,8 +364,14 @@ const requestAuthorization = async (
       },
       body,
       signal: controller.signal,
-    });
-    return config.strictResponse === true
+    };
+    // Under strictResponse, do not auto-follow redirects: a real fetch would
+    // silently follow a 3xx and the strict path would never see it. redirect:
+    // 'error' turns a 3xx into a rejected fetch that lands on the fail-closed
+    // deny path. The default path is left with fetch's normal follow behavior.
+    if (strict) requestInit.redirect = 'error';
+    const response = await fetch(`${apiUrl}/v1/authorize`, requestInit);
+    return strict
       ? await resolveStrictHttpResponse(response)
       : await resolveHttpResponse(response);
   } catch (err: unknown) {

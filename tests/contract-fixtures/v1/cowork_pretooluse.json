@@ -1,13 +1,13 @@
 {
   "framework": "cowork",
   "agentId": "fixture-agent",
-  "txCommit": "01f252fdade76bd306bc76cc44c4ba303736407b4aeb3d15f36a823fccc2440f",
+  "txCommit": "92bf7e19f70272c73f4d1e27740fbeaf44e3f83adec54bae1e6c41b406fbca2e",
   "intent": {
     "action": "bash",
     "arguments": {
-      "command": "ls -la"
+      "command": "CANARY_COMMAND_01"
     },
-    "command": "ls -la",
+    "command": "CANARY_COMMAND_01",
     "task_id": "fixture-session-1",
     "metadata": {
       "cowork": {
@@ -17,8 +17,8 @@
         "cwd": "/fixture/workspace",
         "coverage": "Cowork Bash executes in a Linux sandbox VM and arrives under an opaque per-tool mcp__ name, classified by tool_input shape.",
         "inventoryVersion": 1,
-        "policyProjectionDigest": "5c760d1f8dcec8cc8e5e083caadb03ac1c1634b1e191a32283d77d7885111328",
-        "executionBindingDigest": "5c760d1f8dcec8cc8e5e083caadb03ac1c1634b1e191a32283d77d7885111328"
+        "policyProjectionDigest": "64923616c73820588b44a6ffc52892be6e55f825dcdc8012fdf240d6ec14dee9",
+        "executionBindingDigest": "64923616c73820588b44a6ffc52892be6e55f825dcdc8012fdf240d6ec14dee9"
       }
     }
   }

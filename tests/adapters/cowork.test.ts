@@ -380,6 +380,13 @@ describe('createCoworkPreToolUseHook', () => {
         'a'.repeat(4096),
         'mcp__C44359886C49',
         'mcp__c44359886c4',
+        // Prototype-chain names must not classify as governed with a bare
+        // bracket lookup; they fall to unclassified (MAJOR 1 regression).
+        '__proto__',
+        'constructor',
+        'toString',
+        'hasOwnProperty',
+        'valueOf',
       ];
       for (const name of adversarial) {
         expect(classifyCoworkTool(name, {}).classification).toBe('unclassified');
@@ -392,6 +399,57 @@ describe('createCoworkPreToolUseHook', () => {
         toolClass: 'mcp',
         action: 'mcp__a__b__c',
       });
+    });
+
+    it('opaque names shape-classify to Bash/WebFetch only when the key set is a subset (MAJOR 2)', () => {
+      // Exact real shapes classify as the built-in class.
+      expect(classifyCoworkTool('mcp__c44359886c49', { command: 'ls' }).classification).toBe(
+        'governed',
+      );
+      expect(classifyCoworkTool('mcp__c44359886c49', { command: 'ls' })).toMatchObject({
+        toolClass: 'Bash',
+      });
+      expect(classifyCoworkTool('mcp__4ded42abd557', { url: 'https://x', method: 'GET' })).toMatchObject({
+        toolClass: 'WebFetch',
+      });
+      // A smuggled extra key falls through to generic MCP passthrough, NOT Bash,
+      // so a prompt-injected agent cannot reroute an opaque MCP tool into the
+      // bash policy class and drop the real `path`.
+      expect(classifyCoworkTool('mcp__c44359886c49', { command: 'x', path: '/etc/passwd' })).toEqual({
+        classification: 'governed',
+        toolClass: 'mcp',
+        action: 'mcp__c44359886c49',
+      });
+      expect(classifyCoworkTool('mcp__4ded42abd557', { url: 'https://x', extra: 1 })).toEqual({
+        classification: 'governed',
+        toolClass: 'mcp',
+        action: 'mcp__4ded42abd557',
+      });
+    });
+
+    it('a mixed opaque {command, path} payload projects as generic MCP, transmitting all key names', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(approvedResponse());
+      const hook = createCoworkPreToolUseHook(BASE_CONFIG);
+      await hook({
+        tool_name: 'mcp__c44359886c49',
+        tool_input: { command: 'x', path: '/etc/passwd' },
+      });
+      const body = requestBodyAt(0);
+      expect(body.intent.action).toBe('mcp__c44359886c49');
+      expect(body.intent.arguments).toEqual({
+        server: 'mcp__c44359886c49',
+        tool: 'mcp__c44359886c49',
+        argument_keys: ['command', 'path'],
+      });
+    });
+
+    it('a prototype-chain tool name denies with SIGIL_TOOL_UNCLASSIFIED, never throwing (MAJOR 1)', async () => {
+      vi.mocked(fetch).mockResolvedValue(approvedResponse());
+      const hook = createCoworkPreToolUseHook(BASE_CONFIG);
+      for (const name of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+        const result = await hook({ tool_name: name, tool_input: {} });
+        expect(errorCodeOf(result)).toBe(SIGIL_TOOL_UNCLASSIFIED);
+      }
     });
 
     it('effective classified set deep-equals COWORK_GOVERNED_TOOLS at the current inventoryVersion', () => {
@@ -607,6 +665,82 @@ describe('createCoworkPreToolUseHook', () => {
       const keys = Object.keys(coworkMetadata(requestBodyAt(0)));
       expect(keys).not.toContain('agentId');
       expect(keys).not.toContain('agentType');
+    });
+  });
+
+  // MAJOR 3: confinement stated as "the sensitive value appears in exactly its
+  // declared positions and nowhere else". The top-level intent.command /
+  // intent.url duplicates are DELIBERATE — Sign's Lex evaluates intent.command
+  // today — so this documents them as declared positions rather than removing
+  // them and breaking live policy evaluation.
+  describe('sensitive-value confinement to declared positions', () => {
+    it('a bash token appears in intent.arguments.command and intent.command, and nowhere else', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(approvedResponse());
+      const diagnostics: SigilDiagnostic[] = [];
+      const hook = createCoworkPreToolUseHook({
+        ...BASE_CONFIG,
+        onDiagnostic: (d) => diagnostics.push(d),
+      });
+      const token = 'TOKEN_sk_live_confine_bash';
+      await hook({
+        tool_name: 'Bash',
+        tool_input: { command: `curl -H 'Authorization: ${token}' https://x` },
+        session_id: 's1',
+      });
+      const call = vi.mocked(fetch).mock.calls[0];
+      const rawBody = (call?.[1] as RequestInit).body as string;
+      const body = JSON.parse(rawBody) as CapturedBody & {
+        intent: { command?: string };
+      };
+      // Two declared positions carry the value.
+      expect((body.intent.arguments as Record<string, unknown>)['command']).toContain(token);
+      expect(body.intent.command).toContain(token);
+      // Absent everywhere else: metadata, the deny reason (none here; approval),
+      // and the diagnostic payload.
+      expect(JSON.stringify(body.intent.metadata)).not.toContain(token);
+      expect(JSON.stringify(diagnostics)).not.toContain(token);
+    });
+
+    it('a web_fetch url appears in intent.arguments.url and intent.url, and nowhere else', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(approvedResponse());
+      const diagnostics: SigilDiagnostic[] = [];
+      const hook = createCoworkPreToolUseHook({
+        ...BASE_CONFIG,
+        onDiagnostic: (d) => diagnostics.push(d),
+      });
+      const marker = 'confine-marker-9f3';
+      await hook({
+        tool_name: 'WebFetch',
+        tool_input: { url: `https://example.com/${marker}` },
+      });
+      const call = vi.mocked(fetch).mock.calls[0];
+      const rawBody = (call?.[1] as RequestInit).body as string;
+      const body = JSON.parse(rawBody) as CapturedBody & { intent: { url?: string } };
+      expect((body.intent.arguments as Record<string, unknown>)['url']).toContain(marker);
+      expect(body.intent.url).toContain(marker);
+      expect(JSON.stringify(body.intent.metadata)).not.toContain(marker);
+      expect(JSON.stringify(diagnostics)).not.toContain(marker);
+    });
+
+    it('a denied bash token appears in neither the deny reason nor the diagnostic', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ status: 'DENIED', error_code: 'SIGIL_BASH_BLOCKED', message: 'no' }),
+          { status: 200 },
+        ),
+      );
+      const diagnostics: SigilDiagnostic[] = [];
+      const hook = createCoworkPreToolUseHook({
+        ...BASE_CONFIG,
+        onDiagnostic: (d) => diagnostics.push(d),
+      });
+      const token = 'TOKEN_denied_confine';
+      const result = await hook({
+        tool_name: 'Bash',
+        tool_input: { command: `echo ${token}` },
+      });
+      expect(result?.hookSpecificOutput.permissionDecisionReason).not.toContain(token);
+      expect(JSON.stringify(diagnostics)).not.toContain(token);
     });
   });
 
@@ -888,6 +1022,22 @@ describe('createCoworkPreToolUseHook', () => {
         errorCodeOf(await hook({ tool_name: 'Bash', tool_input: { command: 'ls' } })),
       ).toBe(SIGIL_UNREACHABLE);
     });
+
+    it("sets redirect: 'error' on the strict fetch so a real 3xx fails closed (MINOR 6)", async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(approvedResponse());
+      const hook = createCoworkPreToolUseHook(BASE_CONFIG);
+      await hook({ tool_name: 'Bash', tool_input: { command: 'ls' } });
+      const init = vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit;
+      expect(init.redirect).toBe('error');
+    });
+
+    it('a rejected fetch from redirect:error denies as SIGIL_UNREACHABLE, not a silent follow', async () => {
+      // Emulate what redirect:'error' produces against a real 3xx: fetch rejects.
+      vi.mocked(fetch).mockRejectedValueOnce(new TypeError('unexpected redirect'));
+      const hook = createCoworkPreToolUseHook(BASE_CONFIG);
+      const result = await hook({ tool_name: 'Bash', tool_input: { command: 'ls' } });
+      expect(errorCodeOf(result)).toBe(SIGIL_UNREACHABLE);
+    });
   });
 
   describe('diagnostics', () => {
@@ -1012,6 +1162,15 @@ describe('createCoworkPreToolUseHook', () => {
       expect(canonicalize({ a: 0 }).ok).toBe(true);
     });
 
+    it('rejects lone surrogates so they cannot collide under UTF-8 (MINOR 5)', () => {
+      // '\ud800' and '\ud801' would both map to U+FFFD without this rejection.
+      expect(canonicalize({ a: '\ud800' }).ok).toBe(false);
+      expect(canonicalize({ a: '\udc00' }).ok).toBe(false);
+      expect(canonicalize({ ['\ud800']: 'x' }).ok).toBe(false);
+      // A well-formed surrogate pair (an astral character) still serializes.
+      expect(canonicalize({ a: '🚀' }).ok).toBe(true);
+    });
+
     it('bounds nesting depth at 32', () => {
       let accepted: unknown = 'leaf';
       for (let i = 0; i < 31; i += 1) accepted = { k: accepted };
@@ -1054,8 +1213,46 @@ describe('createCoworkPreToolUseHook', () => {
       );
     });
 
+    it('the action map agrees with every governed inventory entry (MINOR 8)', () => {
+      for (const [name, entry] of Object.entries(COWORK_TOOL_MANIFEST.inventory)) {
+        if (entry.classification === 'governed') {
+          expect(
+            COWORK_TOOL_MANIFEST.actionMap[name],
+            `action map must define ${name}`,
+          ).toBe(entry.action);
+        } else {
+          // Excluded tools carry no action and must not appear in the map.
+          expect(Object.hasOwn(COWORK_TOOL_MANIFEST.actionMap, name)).toBe(false);
+        }
+      }
+      // No stray action-map keys beyond the governed inventory.
+      for (const name of Object.keys(COWORK_TOOL_MANIFEST.actionMap)) {
+        expect(COWORK_TOOL_MANIFEST.inventory[name]?.classification).toBe('governed');
+      }
+    });
+
     it('is re-exported from the package index', () => {
       expect(exportedCoworkHook).toBe(createCoworkPreToolUseHook);
+    });
+  });
+
+  describe('README governed-tool table drift (MINOR 7)', () => {
+    it('the README table block is rendered exactly from COWORK_TOOL_MANIFEST', () => {
+      const readme = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8');
+      const start = '<!-- COWORK_TOOL_TABLE:START -->';
+      const end = '<!-- COWORK_TOOL_TABLE:END -->';
+      const startIdx = readme.indexOf(start);
+      const endIdx = readme.indexOf(end);
+      expect(startIdx).toBeGreaterThanOrEqual(0);
+      expect(endIdx).toBeGreaterThan(startIdx);
+      const block = readme.slice(startIdx + start.length, endIdx).trim();
+
+      const rows = ['| Cowork tool | Classification | Sigil action |', '|---|---|---|'];
+      for (const [name, entry] of Object.entries(COWORK_TOOL_MANIFEST.inventory)) {
+        const action = entry.classification === 'governed' ? `\`${entry.action}\`` : '—';
+        rows.push(`| \`${name}\` | ${entry.classification} | ${action} |`);
+      }
+      expect(block).toBe(rows.join('\n'));
     });
   });
 });

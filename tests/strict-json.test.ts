@@ -4,11 +4,21 @@
 // bytes, never on pre-parsed objects, because JSON.parse destroys the
 // duplicate-key evidence these tests exist to preserve.
 import { describe, expect, it } from 'vitest';
-import { mapStrictJsonError, readStrictJson } from '../src/strict-json.js';
+import * as pkg from '../src/index.js';
 import {
+  mapStrictJsonError,
+  readStrictJson,
+  type StrictJsonErrorClass,
+} from '../src/strict-json.js';
+import {
+  SIGIL_CONFIG_MISSING,
+  SIGIL_HOOK_INTERNAL,
+  SIGIL_HOOK_TIMEOUT,
   SIGIL_INPUT_DUPLICATE_KEY,
   SIGIL_INPUT_ENCODING,
+  SIGIL_INPUT_ERROR,
   SIGIL_INPUT_MALFORMED,
+  SIGIL_INPUT_TIMEOUT,
   SIGIL_INPUT_TOO_LARGE,
   SIGIL_RESPONSE_INVALID,
 } from '../src/types.js';
@@ -102,6 +112,19 @@ describe('readStrictJson', () => {
     });
   });
 
+  it('rejects lone surrogates admitted through \\u escapes (MINOR 5)', () => {
+    expect(readStrictJson(bytes('{"a":"\\ud800"}'))).toMatchObject({
+      ok: false,
+      error: 'malformed',
+    });
+    expect(readStrictJson(bytes('{"\\ud800":"x"}'))).toMatchObject({
+      ok: false,
+      error: 'malformed',
+    });
+    // A well-formed surrogate pair is accepted.
+    expect(readStrictJson(bytes('{"a":"\\ud83d\\ude80"}')).ok).toBe(true);
+  });
+
   it('does not honor __proto__ as a prototype setter', () => {
     const result = readStrictJson(bytes('{"__proto__":{"polluted":true}}'));
     expect(result.ok).toBe(true);
@@ -122,5 +145,55 @@ describe('mapStrictJsonError', () => {
     expect(mapStrictJsonError('encoding', 'response')).toBe(SIGIL_INPUT_ENCODING);
     expect(mapStrictJsonError('oversize', 'stdin')).toBe(SIGIL_INPUT_TOO_LARGE);
     expect(mapStrictJsonError('oversize', 'response')).toBe(SIGIL_RESPONSE_INVALID);
+  });
+});
+
+describe('every declared error-code constant is produced or is a marked Phase D obligation (MINOR 4)', () => {
+  // Every strict-reader failure class must be produced by at least one raw-byte
+  // fixture and reach its public code through mapStrictJsonError. The remaining
+  // constants are produced only in the Phase D wrapper (pretooluse.mjs) and are
+  // asserted on the export surface with a comment marking them as such.
+  const readerFixtures: Array<{ code: string; input: string | Uint8Array; context: 'stdin' | 'response' }> = [
+    { code: SIGIL_INPUT_DUPLICATE_KEY, input: '{"a":1,"a":2}', context: 'stdin' },
+    { code: SIGIL_INPUT_MALFORMED, input: '{', context: 'stdin' },
+    { code: SIGIL_INPUT_ENCODING, input: new Uint8Array([0x7b, 0xff, 0x7d]), context: 'stdin' },
+    { code: SIGIL_INPUT_TOO_LARGE, input: '{}', context: 'stdin' },
+    { code: SIGIL_RESPONSE_INVALID, input: '{}', context: 'response' },
+  ];
+
+  it('produces each reader-side code from a fixture-driven failure', () => {
+    const produced = new Set<string>();
+    for (const fixture of readerFixtures) {
+      const opts = fixture.code === SIGIL_INPUT_TOO_LARGE || fixture.code === SIGIL_RESPONSE_INVALID
+        ? { maxBytes: 1 }
+        : undefined;
+      const result = readStrictJson(fixture.input, opts);
+      expect(result.ok, JSON.stringify(fixture.input)).toBe(false);
+      if (!result.ok) {
+        produced.add(mapStrictJsonError(result.error as StrictJsonErrorClass, fixture.context));
+      }
+    }
+    for (const fixture of readerFixtures) {
+      expect(produced.has(fixture.code), `code ${fixture.code} must be produced`).toBe(true);
+    }
+  });
+
+  it('the five wrapper-phase constants exist on the export surface (Phase D obligations)', () => {
+    // SIGIL_CONFIG_MISSING, SIGIL_HOOK_INTERNAL, SIGIL_HOOK_TIMEOUT,
+    // SIGIL_INPUT_TIMEOUT, and SIGIL_INPUT_ERROR are produced by the Phase D
+    // hook wrapper (cowork-plugin hooks/pretooluse.mjs), not by this package's
+    // adapter or reader. They are declared and exported here so the wrapper can
+    // import them; their production is a Phase D obligation covered by that
+    // repo's integration matrix.
+    for (const constant of [
+      SIGIL_CONFIG_MISSING,
+      SIGIL_HOOK_INTERNAL,
+      SIGIL_HOOK_TIMEOUT,
+      SIGIL_INPUT_TIMEOUT,
+      SIGIL_INPUT_ERROR,
+    ]) {
+      expect(typeof constant).toBe('string');
+      expect((pkg as Record<string, unknown>)[constant]).toBe(constant);
+    }
   });
 });

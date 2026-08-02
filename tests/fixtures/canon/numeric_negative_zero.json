@@ -1,0 +1,8 @@
+{
+  "name": "numeric_negative_zero",
+  "input": {
+    "a": -0.0
+  },
+  "expectError": true,
+  "reason": "negative zero is a prohibited numeric form"
+}

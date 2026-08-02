@@ -23,6 +23,15 @@ Version note: this release is `0.7.0`, not `0.6.0`, because `0.6.0` shipped to n
 - Contract fixture `tests/contract-fixtures/v1/cowork_pretooluse.json`: the outgoing wire body for a Cowork Bash-class call captured through the real HTTP path, whose input field set exactly matches the real captured Bash record (opaque tool name, `effort.level`, `prompt_id`, no `turn_id`, no `model`) with deterministic canary values. Hash added to `SHA256SUMS`.
 - Shared-map regression suite (`tests/adapters/shared-map-regression.test.ts`) against a committed canonical serialization of `TOOL_ACTION_MAP` generated from tag `v0.5.3` — `src/adapters/shared.ts` is untouched, so no existing adapter's action names move on this upgrade.
 
+### Hardening (adversarial review)
+
+- Prototype-chain tool names (`__proto__`, `constructor`, `toString`, `hasOwnProperty`) now fall to unclassified and deny with `SIGIL_TOOL_UNCLASSIFIED` instead of classifying as governed-with-undefined-action and throwing; `classifyCoworkTool` and `projectArguments` use `Object.hasOwn` for every record lookup.
+- Opaque per-tool names shape-classify to the Bash or WebFetch class only when the entire `tool_input` key set is a subset of that class's real field set (Bash: `{command}`; WebFetch: `{url, method?}`). A smuggled extra key (e.g. `{command, path}`) falls through to generic MCP passthrough, so a model-authored key cannot reroute an opaque MCP tool into the bash/web_fetch policy class.
+- Canonicalization and the strict JSON reader reject non-well-formed strings (lone surrogates), which would otherwise collide on one digest via UTF-8 `U+FFFD` substitution. This is a rejection, not an encoding change, so no canon version bump. Added `numeric_negative_zero` and `string_lone_surrogate` rejection fixtures (regenerated through the same independent implementation, so the provenance note holds).
+- `strictResponse` requests set `redirect: 'error'` so a real 3xx becomes a fail-closed deny rather than a silently followed redirect; the default (non-strict) path keeps normal follow behavior.
+- Contract fixture command value aligned to the `CANARY_COMMAND_01` canary form (regenerated through the real HTTP path; `SHA256SUMS` updated).
+- New regression tests for every item above, plus: a confinement test proving a sensitive value appears in exactly its declared positions (`intent.arguments.command` and the deliberately-retained `intent.command` that Sign's Lex evaluates) and nowhere else (metadata, deny reason, diagnostics); a README governed-tool-table drift test rendering the table from `COWORK_TOOL_MANIFEST`; an action-map/inventory consistency test; and a programmatic assertion that every reader-side error-code constant is produced by a fixture (the five wrapper-phase constants are marked Phase D obligations and asserted on the export surface).
+
 ### Changed
 
 - `CoworkPreToolUsePayload` reconciled to the real captured field set: added `transcript_path`, `prompt_id`, `effort`, `agent_id`, `agent_type`; removed the provisional `turn_id` and `model` fields (they do not exist on the surface). `agent_id`/`agent_type` appear only on a subagent's own calls.
