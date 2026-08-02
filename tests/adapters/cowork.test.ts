@@ -166,8 +166,9 @@ describe('createCoworkPreToolUseHook', () => {
       const hook = createCoworkPreToolUseHook(BASE_CONFIG);
       const result = await hook({ tool_name: 'Bash', tool_input: { command: 'x' } });
       expect(result?.hookSpecificOutput.permissionDecision).toBe('deny');
+      if (!result) throw new Error('expected a deny result');
       expectTypeOf(
-        result!.hookSpecificOutput.permissionDecision,
+        result.hookSpecificOutput.permissionDecision,
       ).toEqualTypeOf<'deny'>();
 
       const source = readFileSync(
@@ -246,7 +247,8 @@ describe('createCoworkPreToolUseHook', () => {
     it('defaults an absent value to 2500 silently', () => {
       const warn = vi.mocked(console.warn);
       warn.mockClear();
-      expect(clampCoworkTimeout(undefined)).toBe(2500);
+      const absentTimeout: number | undefined = undefined;
+      expect(clampCoworkTimeout(absentTimeout)).toBe(2500);
       expect(warn).not.toHaveBeenCalled();
     });
   });
@@ -816,12 +818,12 @@ describe('createCoworkPreToolUseHook', () => {
     ])(
       '%s: executionBindingDigest moves with withheld fields while policyProjectionDigest holds',
       async (toolName, _base, variantA, variantB) => {
-        const a = await digestsFor(toolName as string, variantA as Record<string, unknown>);
-        const b = await digestsFor(toolName as string, variantB as Record<string, unknown>);
-        expect(a.projection).toBe(b.projection);
-        expect(a.execution).not.toBe(b.execution);
-        expect(a.projection).toMatch(/^[0-9a-f]{64}$/);
-        expect(a.execution).toMatch(/^[0-9a-f]{64}$/);
+        const digestA = await digestsFor(toolName as string, variantA as Record<string, unknown>);
+        const digestB = await digestsFor(toolName as string, variantB as Record<string, unknown>);
+        expect(digestA.projection).toBe(digestB.projection);
+        expect(digestA.execution).not.toBe(digestB.execution);
+        expect(digestA.projection).toMatch(/^[0-9a-f]{64}$/);
+        expect(digestA.execution).toMatch(/^[0-9a-f]{64}$/);
       },
     );
 
@@ -1166,7 +1168,7 @@ describe('createCoworkPreToolUseHook', () => {
       // '\ud800' and '\ud801' would both map to U+FFFD without this rejection.
       expect(canonicalize({ a: '\ud800' }).ok).toBe(false);
       expect(canonicalize({ a: '\udc00' }).ok).toBe(false);
-      expect(canonicalize({ ['\ud800']: 'x' }).ok).toBe(false);
+      expect(canonicalize({ '\ud800': 'x' }).ok).toBe(false);
       // A well-formed surrogate pair (an astral character) still serializes.
       expect(canonicalize({ a: '🚀' }).ok).toBe(true);
     });

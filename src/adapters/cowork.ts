@@ -397,7 +397,7 @@ function isWellFormedString(value: string): boolean {
   if (typeof withNativeCheck.isWellFormed === 'function') {
     return withNativeCheck.isWellFormed();
   }
-  return !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value);
+  return !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value);
 }
 
 function encodeCanonical(value: unknown, depth: number, out: Buffer[]): void {
@@ -628,8 +628,8 @@ export function createCoworkPreToolUseHook(config: SigilHookConfig) {
     const localDeny = (
       denial: LocalDenial,
       action: string,
-      toolName: string | undefined,
-      classification: SigilDiagnostic['classification'],
+      toolName?: string,
+      classification?: SigilDiagnostic['classification'],
     ): CoworkPreToolUseDenyResult => {
       emit({
         decision: 'DENIED',
@@ -647,7 +647,7 @@ export function createCoworkPreToolUseHook(config: SigilHookConfig) {
 
     const parsed = parseCoworkPayload(rawPayload);
     if ('denial' in parsed) {
-      return localDeny(parsed.denial, 'cowork.pre_tool_use', undefined, undefined);
+      return localDeny(parsed.denial, 'cowork.pre_tool_use');
     }
     const payload = parsed.payload;
 
@@ -658,8 +658,6 @@ export function createCoworkPreToolUseHook(config: SigilHookConfig) {
           message: 'Cowork PreToolUse payload is missing tool_name.',
         },
         'cowork.pre_tool_use',
-        undefined,
-        undefined,
       );
     }
     const toolName = payload.tool_name;
@@ -671,7 +669,6 @@ export function createCoworkPreToolUseHook(config: SigilHookConfig) {
         },
         'cowork.pre_tool_use',
         toolName,
-        undefined,
       );
     }
     const rawInput = payload.tool_input ?? {};

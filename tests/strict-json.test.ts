@@ -4,6 +4,8 @@
 // bytes, never on pre-parsed objects, because JSON.parse destroys the
 // duplicate-key evidence these tests exist to preserve.
 import { describe, expect, it } from 'vitest';
+// skipcq: JS-C1003 — the namespace import is deliberate: the Phase D obligation
+// check indexes the package root export surface dynamically by constant name.
 import * as pkg from '../src/index.js';
 import {
   mapStrictJsonError,
@@ -79,7 +81,7 @@ describe('readStrictJson', () => {
   });
 
   it('bounds nesting depth', () => {
-    const nested = (n: number): string => '{"k":'.repeat(n) + '1' + '}'.repeat(n);
+    const nested = (n: number): string => `${'{"k":'.repeat(n)}1${'}'.repeat(n)}`;
     expect(readStrictJson(bytes(nested(31))).ok).toBe(true);
     expect(readStrictJson(bytes(nested(33)))).toMatchObject({ ok: false, error: 'malformed' });
     expect(readStrictJson(bytes(nested(5)), { maxDepth: 4 })).toMatchObject({

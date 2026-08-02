@@ -6,6 +6,8 @@
 // a consumer would — from the package index — and fail if either export
 // disappears or changes shape.
 import { describe, expect, it } from 'vitest';
+// skipcq: JS-C1003 — the namespace import is deliberate: this test enumerates the
+// package root export surface, which is exactly what a whole-namespace import verifies.
 import * as pkg from '../src/index.js';
 
 describe('package export surface', () => {

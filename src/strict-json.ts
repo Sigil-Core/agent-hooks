@@ -146,7 +146,7 @@ function isWellFormedString(value: string): boolean {
   if (typeof withNativeCheck.isWellFormed === 'function') {
     return withNativeCheck.isWellFormed();
   }
-  return !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value);
+  return !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value);
 }
 
 class StrictParser {
