@@ -1,0 +1,8 @@
+{
+  "name": "numeric_unsafe",
+  "input": {
+    "a": 1e+300
+  },
+  "expectError": true,
+  "reason": "outside the safe-integer range"
+}

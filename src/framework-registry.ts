@@ -83,7 +83,7 @@ export const FRAMEWORKS: Record<string, FrameworkDescriptor> = {
     integrationType: 'adapter',
     language: 'typescript',
     adapterExport: 'createCoworkPreToolUseHook',
-    notes: 'Normalizes the provisional Cowork PreToolUse payload and returns the hookSpecificOutput deny shape. The payload contract remains pending a real Phase A Procedure 9 capture.',
+    notes: 'Maps PENDING to a deny so Sigil holds cannot be bypassed by local approval; never emits ask or defer. Forces failMode: "closed" and framework: "cowork" unconditionally. Coverage is the versioned COWORK_GOVERNED_TOOLS inventory while the hook process runs to completion (the measured completion boundary); payload contract pinned by the 2026-08-02 Phase A capture.',
   },
   openrouter: {
     id: 'openrouter',

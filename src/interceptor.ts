@@ -1,13 +1,21 @@
 // src/interceptor.ts
 import { resolveTaskId, serializeAuthorizeRequestBody } from './request.js';
+import { readStrictJson } from './strict-json.js';
 import type { SigilHookConfig, SigilHookResult, SigilIntent } from './types.js';
 import {
   SIGIL_LIMIT_STORE_UNAVAILABLE,
   SIGIL_LOOP_LIMIT_EXCEEDED,
+  SIGIL_RATE_LIMITED,
+  SIGIL_RESPONSE_INVALID,
   SIGIL_UNREACHABLE,
 } from './types.js';
 
 const DEFAULT_API_URL = 'https://sign.sigilcore.com';
+
+/** strictResponse mode: response body cap in UTF-8 bytes (64 KiB). */
+const STRICT_RESPONSE_BODY_CAP_BYTES = 64 * 1024;
+/** strictResponse mode: body-read deadline, so a body that streams slowly forever still denies fast. */
+const STRICT_RESPONSE_BODY_DEADLINE_MS = 1500;
 
 type AuthorizationHttpResult =
   | { data: Record<string, unknown> }
@@ -112,6 +120,194 @@ const resolveHttpResponse = async (
   return resolveAuthorizationData(data);
 };
 
+// --- strictResponse mode (selected by the Cowork adapter) -------------------
+//
+// The contract is inverted so the unsafe case cannot be reached by omission:
+// only a strictly schema-valid explicit APPROVED may flow through to an
+// approval. Every other outcome maps to a deny. The default path below is
+// untouched and remains byte-identical in behavior for every other adapter.
+
+type StrictBodyResult =
+  | { bytes: Uint8Array }
+  | { error: 'oversize' | 'timeout' | 'read_error' };
+
+const concatChunks = (chunks: Uint8Array[], total: number): Uint8Array => {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+};
+
+/**
+ * Reads the raw response body under the 64 KiB cap and a read deadline. The
+ * cap alone does not terminate a body that streams slowly forever below it;
+ * only the deadline does, which is why both exist.
+ */
+const readStrictResponseBody = async (
+  response: Response,
+): Promise<StrictBodyResult> => {
+  const body = response.body;
+  if (body === null) return { bytes: new Uint8Array(0) };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    reader.cancel().catch(() => undefined);
+  }, STRICT_RESPONSE_BODY_DEADLINE_MS);
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (timedOut) return { error: 'timeout' };
+      if (done) break;
+      total += value.byteLength;
+      if (total > STRICT_RESPONSE_BODY_CAP_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return { error: 'oversize' };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { error: timedOut ? 'timeout' : 'read_error' };
+  } finally {
+    clearTimeout(timer);
+  }
+  if (timedOut) return { error: 'timeout' };
+  return { bytes: concatChunks(chunks, total) };
+};
+
+const STRICT_APPROVED_KEYS = new Set(['status', 'policy_hash', 'task_id']);
+
+const isOptionalStrictString = (
+  data: Record<string, unknown>,
+  key: string,
+): boolean => !(key in data) || typeof data[key] === 'string';
+
+/**
+ * The exact accepted APPROVED shape: a JSON object whose `status` is
+ * "APPROVED", with optional string `policy_hash` and `task_id` and nothing
+ * else. Any unknown field rejects — ignoring unknown fields on the one status
+ * that means "proceed" is how a future server field silently becomes a bypass.
+ * Cross-status fields (`hold_id`, `error_code`, `fail_open`/`failOpen`) are
+ * therefore protocol violations here by construction.
+ */
+const isStrictValidApproved = (data: Record<string, unknown>): boolean =>
+  data['status'] === 'APPROVED' &&
+  Object.keys(data).every((key) => STRICT_APPROVED_KEYS.has(key)) &&
+  isOptionalStrictString(data, 'policy_hash') &&
+  isOptionalStrictString(data, 'task_id');
+
+const isStrictValidDenied = (data: Record<string, unknown>): boolean =>
+  data['status'] === 'DENIED' &&
+  typeof data['error_code'] === 'string' &&
+  data['error_code'].length > 0 &&
+  isOptionalStrictString(data, 'message') &&
+  isOptionalStrictString(data, 'next_steps') &&
+  isOptionalStrictString(data, 'policy_hash') &&
+  isOptionalStrictString(data, 'task_id');
+
+const isStrictValidPending = (data: Record<string, unknown>): boolean =>
+  data['status'] === 'PENDING' &&
+  typeof data['hold_id'] === 'string' &&
+  data['hold_id'].length > 0 &&
+  isOptionalStrictString(data, 'message') &&
+  isOptionalStrictString(data, 'policy_hash') &&
+  isOptionalStrictString(data, 'task_id');
+
+/** A protocol violation expressed as denial data, so the ordinary mapping (callbacks, task id) applies. */
+const strictProtocolDenial = (
+  errorCode: string,
+  message: string,
+): Record<string, unknown> => ({
+  status: 'DENIED',
+  error_code: errorCode,
+  message,
+});
+
+const resolveStrictParsedBody = (
+  data: Record<string, unknown>,
+): AuthorizationHttpResult => {
+  if (data['status'] === 'APPROVED' && isStrictValidApproved(data)) {
+    return { data };
+  }
+  if (data['status'] === 'DENIED' && isStrictValidDenied(data)) {
+    return { data };
+  }
+  if (data['status'] === 'PENDING' && isStrictValidPending(data)) {
+    return { data };
+  }
+  return {
+    data: strictProtocolDenial(
+      SIGIL_RESPONSE_INVALID,
+      'Authorization response failed strict schema validation.',
+    ),
+  };
+};
+
+const resolveStrictHttpResponse = async (
+  response: Response,
+): Promise<AuthorizationHttpResult> => {
+  if (response.status === 401) {
+    return { result: authenticationFailure(401) };
+  }
+  if (response.status >= 500) {
+    throw new Error(`sigil_server_${response.status}`);
+  }
+  if (response.status === 429) {
+    return {
+      data: strictProtocolDenial(
+        SIGIL_RATE_LIMITED,
+        'Sigil Sign rate limited the request (429). Denied fast rather than retried.',
+      ),
+    };
+  }
+  if (response.status !== 200 && response.status !== 403) {
+    return {
+      data: strictProtocolDenial(
+        SIGIL_RESPONSE_INVALID,
+        `Unexpected authorization response status ${response.status}.`,
+      ),
+    };
+  }
+  const body = await readStrictResponseBody(response);
+  if ('error' in body) {
+    if (response.status === 403) {
+      return { result: authenticationFailure(403) };
+    }
+    return {
+      data: strictProtocolDenial(
+        SIGIL_RESPONSE_INVALID,
+        `Authorization response body rejected (${body.error}).`,
+      ),
+    };
+  }
+  const parsed = readStrictJson(body.bytes, {
+    maxBytes: STRICT_RESPONSE_BODY_CAP_BYTES,
+  });
+  if (!parsed.ok) {
+    if (response.status === 403) {
+      return { result: authenticationFailure(403) };
+    }
+    return {
+      data: strictProtocolDenial(
+        SIGIL_RESPONSE_INVALID,
+        `Authorization response rejected: ${parsed.message}`,
+      ),
+    };
+  }
+  if (response.status === 403) {
+    if (isStrictValidDenied(parsed.value)) return { data: parsed.value };
+    return { result: authenticationFailure(403) };
+  }
+  return resolveStrictParsedBody(parsed.value);
+};
+
+// --- end strictResponse mode ------------------------------------------------
+
 const handleRequestError = (
   intent: SigilIntent,
   config: SigilHookConfig,
@@ -149,6 +345,15 @@ const requestAuthorization = async (
   const timeoutMs = config.requestTimeoutMs ?? 10_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Propagate a caller-supplied AbortSignal into the socket, so an aborted
+  // wrapper deadline actually cancels the in-flight request rather than
+  // leaving it alive behind a settled process.
+  const externalSignal = config.signal;
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal !== undefined) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
   try {
     const response = await fetch(`${apiUrl}/v1/authorize`, {
       method: 'POST',
@@ -159,12 +364,15 @@ const requestAuthorization = async (
       body,
       signal: controller.signal,
     });
-    return await resolveHttpResponse(response);
+    return config.strictResponse === true
+      ? await resolveStrictHttpResponse(response)
+      : await resolveHttpResponse(response);
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
     return { result: handleRequestError(intent, config, error) };
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 };
 

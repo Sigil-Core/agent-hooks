@@ -148,16 +148,88 @@ Native in-process integration (implementing IronClaw's `Hook` trait) ships as [`
 | NVIDIA NemoClaw | `createOpenclawSigilHandler` | TS | Adapter (via OpenClaw) |
 | IronClaw (nearai) | [`sigil-agent-hooks-ironclaw`](https://github.com/Sigil-Core/agent-hooks-rs) | Rust | Adapter |
 | OpenAI Codex | `createCodexPreToolUseHook` | TS | Adapter |
-| Cowork (provisional PreToolUse payload) | `createCoworkPreToolUseHook` | TS | Adapter |
+| Claude Cowork | `createCoworkPreToolUseHook` | TS | Adapter |
 | Hermes Agent | `createHermesPreToolCallHook` | TS | Adapter |
 | OpenRouter | `createOpenRouterToolGate` | TS | Adapter |
 | AgentPay (WLFI) | `checkAgentPayTransfer` | TS | Adapter |
 
 The typed registry lives at [`src/framework-registry.ts`](./src/framework-registry.ts) and is exported as `FRAMEWORKS`.
 
-The Cowork payload type remains provisional pending a real PreToolUse capture
-through the real hook path. Version 0.6.0 does not include a synthetic Cowork
-contract fixture.
+## Claude Cowork
+
+`createCoworkPreToolUseHook` backs the Sigil Warrant enforcement plugin for
+Claude Cowork. It checks the organization's signed Sigil Warrant before each
+tool call in the versioned governed-tool inventory (`COWORK_GOVERNED_TOOLS`,
+`inventoryVersion` 1), while the hook process runs to completion. Coverage is
+that inventory and that measured completion boundary — not the whole tool
+surface, and not arbitrary process termination.
+
+```typescript
+import { createCoworkPreToolUseHook } from '@sigilcore/agent-hooks';
+
+const hook = createCoworkPreToolUseHook({
+  apiKey: process.env.CLAUDE_PLUGIN_OPTION_SIGIL_API_KEY!,
+  agentId: 'cowork',
+});
+
+// stdin bytes from the PreToolUse hook host; the adapter strict-parses them.
+const result = await hook(rawStdinBytes);
+// undefined        -> print nothing, exit 0 (normal permission flow continues)
+// deny object      -> print it, exit 0 (Cowork blocks the tool call)
+```
+
+Behavior that configuration cannot weaken: `framework: 'cowork'`,
+`failMode: 'closed'`, and strict response validation are forced, not
+defaulted. `DENIED` and `PENDING` both emit `permissionDecision: "deny"`; a
+hold is resolvable only out of band in Sigil Command, never by a local
+approval prompt, and the adapter never emits `ask` or `defer`. Every reachable
+client-side failure — Sign unreachable, 5xx, timeout, egress 403, missing
+credential, malformed input, protocol-invalid response, unclassified tool —
+blocks rather than proceeds. Only a strictly schema-valid explicit `APPROVED`
+response can approve.
+
+Governed-tool inventory (from `COWORK_TOOL_MANIFEST`):
+
+| Cowork tool | Classification | Sigil action |
+|---|---|---|
+| `Bash` | governed | `bash` |
+| `Edit`, `Write` | governed | `file_write` |
+| `Read`, `Glob`, `Grep` | governed | `file_read` |
+| `Agent` | governed | `agent_spawn` |
+| `WebFetch`, `WebSearch` | governed | `web_fetch` (promoted to `http` with an explicit method) |
+| `mcp__<server>__<tool>` | governed | literal passthrough |
+| `AskUserQuestion`, `ExitPlanMode` | excluded | none (no external effect; returned before any network call) |
+| anything else | unclassified | denied with `SIGIL_TOOL_UNCLASSIFIED` |
+
+On the real Cowork host, built-in classes arrive under opaque per-tool names
+(`mcp__<12-hex>`; the 2026-08-02 Phase A capture recorded Bash as
+`mcp__c44359886c49` and WebFetch as `mcp__4ded42abd557`). The classifier
+resolves those by `tool_input` shape: a string `command` is the Bash class, a
+string `url` is the WebFetch class, anything else is generic MCP passthrough.
+`WebSearch` does not exist on that surface; the inventory entry governs the
+name if it ever appears.
+
+Only the per-action projection reaches Sign (`bash.command`, file paths,
+patterns, a userinfo-stripped URL, MCP argument key names). File contents,
+edit strings, agent prompts, and MCP argument values are withheld and covered
+cryptographically by `executionBindingDigest` over the complete raw
+`tool_input`, alongside `policyProjectionDigest` over what Sign evaluates —
+both computed by the byte-pinned `sigil-canon/1` canonicalization. Oversize
+values are rejected, never truncated.
+
+One deliberate fail-closed boundary on that canonicalization: only integers
+within the safe-integer range serialize. A raw `tool_input` carrying a
+fractional number, `-0`, or a value outside the safe-integer range (for
+example an MCP argument like `temperature: 0.7` or a 64-bit numeric id)
+denies the call with `SIGIL_INPUT_MALFORMED` before any request is sent,
+regardless of the Warrant. Every convention for encoding those forms invites
+two implementations to differ and silently invalidate hold identity, so the
+format rejects them; if legitimate traffic hits this, the canon version moves
+rather than the rule. Encode such values as strings on the tool side.
+
+A Cowork Warrant must name `file_read` and `agent_spawn` in
+`tool_calls.allowed`; omitting `file_read` denies every `Read`, `Glob`, and
+`Grep` call.
 
 ## Typed HTTP intents
 

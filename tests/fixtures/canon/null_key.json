@@ -1,0 +1,8 @@
+{
+  "name": "null_key",
+  "input": {
+    "a": null
+  },
+  "canonicalHex": "736967696c2d63616e6f6e2f317c6f313a73313a613b7a3b3b",
+  "sha256": "65da6794aaf00cd1839356603464c8770f73a9f4d85151b4dca1186b92fda53a"
+}

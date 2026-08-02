@@ -1,0 +1,9 @@
+{
+  "name": "unicode_non_bmp_key_sort",
+  "input": {
+    "\ud83d\ude00": "non-bmp \ud83d\ude80",
+    "\ufffd": "bmp"
+  },
+  "canonicalHex": "736967696c2d63616e6f6e2f317c6f323a73333aefbfbd3b73333a626d703b73343af09f98803b7331323a6e6f6e2d626d7020f09f9a803b3b",
+  "sha256": "099c8f74246528c1a4cda1f1d861a71c3dfaa4c91cf0427b50b8881879e75a8b"
+}

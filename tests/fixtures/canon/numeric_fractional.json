@@ -1,0 +1,8 @@
+{
+  "name": "numeric_fractional",
+  "input": {
+    "a": 1.5
+  },
+  "expectError": true,
+  "reason": "fractional value"
+}

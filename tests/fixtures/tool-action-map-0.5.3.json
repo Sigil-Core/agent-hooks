@@ -1,0 +1,6 @@
+{
+  "description": "Canonical serialization of TOOL_ACTION_MAP as it exists at tag v0.5.3, plus the SHA-256 of src/adapters/shared.ts at that tag. Generated once from the tag; never regenerate from a live import.",
+  "tag": "v0.5.3",
+  "sharedTsSha256": "3c7c271816c11c9fdcee6429633836fd18bfe1154c27fdce07f07bad93ff2f26",
+  "toolActionMapCanonical": "{\"Bash\":\"bash\",\"Edit\":\"file_write\",\"WebFetch\":\"web_fetch\",\"WebSearch\":\"web_fetch\",\"Write\":\"file_write\",\"apply_patch\":\"file_write\",\"bash\":\"bash\",\"browser\":\"web_fetch\",\"code_execution\":\"bash\",\"computer\":\"bash\",\"contract.call\":\"contract.call\",\"contract_call\":\"contract.call\",\"edit\":\"file_write\",\"exec\":\"bash\",\"http\":\"http\",\"patch\":\"file_write\",\"process\":\"bash\",\"terminal\":\"bash\",\"wallet.transfer\":\"wallet.transfer\",\"wallet_transfer\":\"wallet.transfer\",\"web_extract\":\"web_fetch\",\"web_fetch\":\"web_fetch\",\"web_search\":\"web_fetch\",\"write\":\"file_write\",\"write_file\":\"file_write\",\"x_search\":\"web_fetch\"}"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "nfc_combining",
+  "input": {
+    "cafe\u0301": "e\u0301"
+  },
+  "canonicalHex": "736967696c2d63616e6f6e2f317c6f313a73353a636166c3a93b73323ac3a93b3b",
+  "sha256": "a0c8b989fd6a857f3c34b96f439a491ebe7214deb21233570e0b007830f89269"
+}
