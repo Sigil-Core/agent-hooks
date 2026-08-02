@@ -12,6 +12,7 @@ export {
 } from './model-usage.js';
 export { checkAnthropicToolUse } from './adapters/claude.js';
 export { createCodexPreToolUseHook } from './adapters/codex.js';
+export { createCoworkPreToolUseHook } from './adapters/cowork.js';
 export { checkElizaAction } from './adapters/eliza.js';
 export { createHermesPreToolCallHook } from './adapters/hermes.js';
 export { wrapLangChainTool } from './adapters/langchain.js';
@@ -48,6 +49,11 @@ export type {
   CodexPreToolUsePayload,
   CodexPreToolUseResult,
 } from './adapters/codex.js';
+export type {
+  CoworkPreToolUseDenyResult,
+  CoworkPreToolUsePayload,
+  CoworkPreToolUseResult,
+} from './adapters/cowork.js';
 export type { ElizaAction } from './adapters/eliza.js';
 export type {
   HermesPreToolCallBlock,
