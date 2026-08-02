@@ -1,0 +1,11 @@
+{
+  "name": "ascii_object",
+  "input": {
+    "b": "x",
+    "a": 1,
+    "c": true,
+    "d": null
+  },
+  "canonicalHex": "736967696c2d63616e6f6e2f317c6f343a73313a613b69313b73313a623b73313a783b73313a633b743b73313a643b7a3b3b",
+  "sha256": "77db8a393a54d86ef451f77e577b922cdd2317467b01a23c4a16b0dd9d86ea11"
+}

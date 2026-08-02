@@ -1,0 +1,8 @@
+{
+  "name": "string_one",
+  "input": {
+    "a": "1"
+  },
+  "canonicalHex": "736967696c2d63616e6f6e2f317c6f313a73313a613b73313a313b3b",
+  "sha256": "3ea62d6eab444693de4045f5f13dcf87f0052bb183adbf568f8f4799609def8f"
+}

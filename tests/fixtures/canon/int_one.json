@@ -1,0 +1,8 @@
+{
+  "name": "int_one",
+  "input": {
+    "a": 1
+  },
+  "canonicalHex": "736967696c2d63616e6f6e2f317c6f313a73313a613b69313b3b",
+  "sha256": "0ecdcd42a1db8f3dfea191fbdd3d10c8a4e38c21d787e816393e0db7fa717caf"
+}

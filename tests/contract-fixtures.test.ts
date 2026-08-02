@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createCoworkPreToolUseHook } from '../src/adapters/cowork.js';
 import { checkIntent } from '../src/interceptor.js';
 import type { SigilHookConfig, SigilIntent } from '../src/types.js';
 
@@ -23,9 +24,8 @@ function readFixture(name: string): string {
   return readFileSync(resolve(FIXTURE_ROOT, name), 'utf8');
 }
 
-async function captureWireBody(
-  intent: SigilIntent,
-  config: SigilHookConfig,
+async function captureWire(
+  run: (apiUrl: string) => Promise<unknown>,
 ): Promise<string> {
   return await new Promise<string>((resolvePromise, rejectPromise) => {
     let capturedBody = '';
@@ -54,14 +54,55 @@ async function captureWireBody(
     server.listen(0, '127.0.0.1', async () => {
       const { port } = server.address() as AddressInfo;
       try {
-        await checkIntent(intent, {
-          ...config,
-          apiUrl: `http://127.0.0.1:${port}`,
-        });
+        await run(`http://127.0.0.1:${port}`);
       } catch (error) {
         server.close(() => rejectPromise(error));
       }
     });
+  });
+}
+
+async function captureWireBody(
+  intent: SigilIntent,
+  config: SigilHookConfig,
+): Promise<string> {
+  return await captureWire(async (apiUrl) => {
+    await checkIntent(intent, { ...config, apiUrl });
+  });
+}
+
+/**
+ * Canary payload for the Cowork contract fixture. The FIELD SET exactly
+ * matches the real captured Bash-class record from the Phase A payload
+ * capture of 2026-08-02 (session_id, transcript_path, cwd, prompt_id,
+ * permission_mode, effort.level, hook_event_name, tool_name, tool_input
+ * .command, tool_use_id; the tool arrives under an opaque per-tool mcp__
+ * digest name). Values are deterministic canaries, never real host paths or
+ * session ids, per the fixture conventions.
+ */
+const COWORK_FIXTURE_PAYLOAD = {
+  session_id: 'fixture-session-1',
+  transcript_path: '/fixture/transcripts/session-1.jsonl',
+  cwd: '/fixture/workspace',
+  prompt_id: 'fixture-prompt-1',
+  permission_mode: 'default',
+  effort: { level: 'medium' },
+  hook_event_name: 'PreToolUse',
+  tool_name: 'mcp__aaaaaaaaaaaa',
+  tool_input: { command: 'CANARY_COMMAND_01' },
+  tool_use_id: 'toolu_fixture_1',
+};
+
+async function captureCoworkWireBody(): Promise<string> {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2023-11-14T22:13:20Z'));
+  return await captureWire(async (apiUrl) => {
+    const hook = createCoworkPreToolUseHook({
+      apiKey: 'sk_sigil_test_key',
+      agentId: 'fixture-agent',
+      apiUrl,
+    });
+    await hook(COWORK_FIXTURE_PAYLOAD);
   });
 }
 
@@ -143,6 +184,11 @@ describe('contract fixtures', () => {
     );
 
     expect(actual).toBe(readFixture('intent_agent_override.json'));
+  });
+
+  it('cowork_pretooluse fixture matches the actual HTTP wire body', async () => {
+    const actual = await captureCoworkWireBody();
+    expect(actual).toBe(readFixture('cowork_pretooluse.json'));
   });
 
   it('pins fixtures to a real agent-hooks-rs commit sha', () => {

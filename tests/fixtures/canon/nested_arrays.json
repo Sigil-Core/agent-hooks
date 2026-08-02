@@ -1,0 +1,20 @@
+{
+  "name": "nested_arrays",
+  "input": {
+    "a": [
+      [
+        1,
+        2
+      ],
+      [
+        3,
+        [
+          4
+        ]
+      ]
+    ],
+    "b": []
+  },
+  "canonicalHex": "736967696c2d63616e6f6e2f317c6f323a73313a613b61323a61323a69313b69323b3b61323a69333b61313a69343b3b3b3b73313a623b61303a3b3b",
+  "sha256": "aa2fddc2c522f1791a9f97588f98abe5373df635563018bfe3de8de6b1d5a06a"
+}

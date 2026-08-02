@@ -33,6 +33,7 @@ export function buildAuthorizeRequestBody(
     chainId: intent.chainId,
     intent: {
       action: intent.action,
+      arguments: intent.arguments,
       command: intent.command,
       url: intent.url,
       method: intent.action === 'http' ? intent.method : undefined,

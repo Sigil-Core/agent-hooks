@@ -31,6 +31,35 @@ export const SIGIL_MODEL_SPEND_LIMIT_EXCEEDED = 'SIGIL_MODEL_SPEND_LIMIT_EXCEEDE
 export const SIGIL_MODEL_TOKEN_LIMIT_EXCEEDED = 'SIGIL_MODEL_TOKEN_LIMIT_EXCEEDED' as const;
 export const SIGIL_MODEL_USAGE_UNAVAILABLE = 'SIGIL_MODEL_USAGE_UNAVAILABLE' as const;
 
+// Cowork adapter error codes (additive, 0.7.0). Each maps to exactly one
+// failure class; the strict-reader map lives in src/strict-json.ts.
+/** A matched tool name absent from the versioned governed-tool inventory. */
+export const SIGIL_TOOL_UNCLASSIFIED = 'SIGIL_TOOL_UNCLASSIFIED' as const;
+/** A Sign response that failed strict schema validation. Never an approval. */
+export const SIGIL_RESPONSE_INVALID = 'SIGIL_RESPONSE_INVALID' as const;
+/** HTTP 429 from Sign, denied fast rather than retried in line. */
+export const SIGIL_RATE_LIMITED = 'SIGIL_RATE_LIMITED' as const;
+/** A policy-bearing value over its byte cap. Rejected, never truncated. */
+export const SIGIL_INPUT_OVERSIZE = 'SIGIL_INPUT_OVERSIZE' as const;
+/** Duplicate object key detected by the strict JSON reader on raw bytes. */
+export const SIGIL_INPUT_DUPLICATE_KEY = 'SIGIL_INPUT_DUPLICATE_KEY' as const;
+/** Required configuration (API key) absent; denied before any network call. */
+export const SIGIL_CONFIG_MISSING = 'SIGIL_CONFIG_MISSING' as const;
+/** Internal wrapper failure; enforcement could not complete. */
+export const SIGIL_HOOK_INTERNAL = 'SIGIL_HOOK_INTERNAL' as const;
+/** The wrapper's own process deadline fired before a decision. */
+export const SIGIL_HOOK_TIMEOUT = 'SIGIL_HOOK_TIMEOUT' as const;
+/** Syntactically invalid input: bad JSON, non-object root, depth past bound, or a prohibited numeric form. */
+export const SIGIL_INPUT_MALFORMED = 'SIGIL_INPUT_MALFORMED' as const;
+/** Input over the byte cap on the request (stdin) side. */
+export const SIGIL_INPUT_TOO_LARGE = 'SIGIL_INPUT_TOO_LARGE' as const;
+/** Input that is not valid UTF-8. */
+export const SIGIL_INPUT_ENCODING = 'SIGIL_INPUT_ENCODING' as const;
+/** The stdin read deadline elapsed before the payload arrived. */
+export const SIGIL_INPUT_TIMEOUT = 'SIGIL_INPUT_TIMEOUT' as const;
+/** A stream error while reading input. */
+export const SIGIL_INPUT_ERROR = 'SIGIL_INPUT_ERROR' as const;
+
 export interface SigilModelUsage {
   provider?: string;
   model?: string;
@@ -49,8 +78,29 @@ export interface SigilModelUsageReport {
   estimated_spend_usd?: string;
 }
 
+/**
+ * Structured diagnostic emitted through `onDiagnostic` so a hook wrapper can
+ * build its audit line from fields rather than by parsing the deny reason
+ * string, which is prose intended for the agent and not a machine interface.
+ */
+export interface SigilDiagnostic {
+  /** Absent for an excluded-tool skip, where no decision was made. */
+  decision?: SigilDecision;
+  errorCode?: string;
+  holdId?: string;
+  policyHash?: string;
+  taskId?: string;
+  toolName?: string;
+  classification?: 'governed' | 'excluded' | 'unclassified';
+  latencyMs?: number;
+  /** Derived from the response shape: 'ok', 'unreachable', 'http_error', or 'not_attempted'. */
+  reachability?: string;
+}
+
 export interface SigilIntent {
   action: string;          // e.g. 'bash', 'web_fetch', 'http', 'file_write', 'wallet.transfer'
+  /** Per-action authorization projection (Cowork adapter). Only named, capped fields; never the raw tool input. */
+  arguments?: Record<string, unknown>;
   agentId?: string;
   chainId?: number;        // EVM only
   command?: string;        // bash only
@@ -74,6 +124,17 @@ export interface SigilHookConfig {
   taskId?: string;         // default: generated once per process/session
   failMode?: 'open' | 'closed';    // default: 'open'
   requestTimeoutMs?: number;       // default: 10_000
+  /**
+   * Strict response validation (selected by the Cowork adapter): the body is
+   * read under a 64 KiB cap with a read deadline, parsed by the strict JSON
+   * reader, and only a strictly schema-valid explicit APPROVED can approve.
+   * Every other outcome denies. Default off; the default path is unchanged.
+   */
+  strictResponse?: boolean;
+  /** Propagated into fetch so an aborted caller deadline cancels the socket. */
+  signal?: AbortSignal;
+  /** Structured audit fields for hook wrappers; never throws outward. */
+  onDiagnostic?: (diagnostic: SigilDiagnostic) => void;
   onDenied?: (intent: SigilIntent, reason: string) => void;
   onPending?: (intent: SigilIntent, holdId: string) => void;
   onError?: (intent: SigilIntent, error: Error) => void;

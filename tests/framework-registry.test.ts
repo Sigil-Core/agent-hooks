@@ -58,4 +58,14 @@ describe('FRAMEWORKS registry', () => {
     expect(FRAMEWORKS.ironclaw!.language).toBe('rust');
     expect(FRAMEWORKS.ironclaw!.integrationType).toBe('documentation');
   });
+
+  it('cowork notes name the PENDING-to-deny rule and the forced fail-closed mode', () => {
+    const cowork = FRAMEWORKS.cowork;
+    expect(cowork).toBeDefined();
+    const notes = cowork?.notes ?? '';
+    expect(notes).toContain('PENDING to a deny');
+    expect(notes).toContain('failMode: "closed"');
+    expect(notes).toContain('completion');
+    expect(cowork?.adapterExport).toBe('createCoworkPreToolUseHook');
+  });
 });
