@@ -77,6 +77,14 @@ export const FRAMEWORKS: Record<string, FrameworkDescriptor> = {
     adapterExport: 'createCodexPreToolUseHook',
     notes: 'Normalizes Codex PreToolUse payloads and returns the documented hookSpecificOutput deny shape.',
   },
+  cowork: {
+    id: 'cowork',
+    displayName: 'Cowork',
+    integrationType: 'adapter',
+    language: 'typescript',
+    adapterExport: 'createCoworkPreToolUseHook',
+    notes: 'Normalizes the provisional Cowork PreToolUse payload and returns the hookSpecificOutput deny shape. The payload contract remains pending a real Phase A Procedure 9 capture.',
+  },
   openrouter: {
     id: 'openrouter',
     displayName: 'OpenRouter',

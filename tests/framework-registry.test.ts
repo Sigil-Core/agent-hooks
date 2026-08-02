@@ -12,6 +12,7 @@ describe('FRAMEWORKS registry', () => {
         'agentpay',
         'anthropic-sdk',
         'codex',
+        'cowork',
         'eliza',
         'hermes',
         'ironclaw',

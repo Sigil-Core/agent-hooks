@@ -148,11 +148,16 @@ Native in-process integration (implementing IronClaw's `Hook` trait) ships as [`
 | NVIDIA NemoClaw | `createOpenclawSigilHandler` | TS | Adapter (via OpenClaw) |
 | IronClaw (nearai) | [`sigil-agent-hooks-ironclaw`](https://github.com/Sigil-Core/agent-hooks-rs) | Rust | Adapter |
 | OpenAI Codex | `createCodexPreToolUseHook` | TS | Adapter |
+| Cowork (provisional PreToolUse payload) | `createCoworkPreToolUseHook` | TS | Adapter |
 | Hermes Agent | `createHermesPreToolCallHook` | TS | Adapter |
 | OpenRouter | `createOpenRouterToolGate` | TS | Adapter |
 | AgentPay (WLFI) | `checkAgentPayTransfer` | TS | Adapter |
 
 The typed registry lives at [`src/framework-registry.ts`](./src/framework-registry.ts) and is exported as `FRAMEWORKS`.
+
+The Cowork payload type remains provisional pending a real PreToolUse capture
+through the real hook path. Version 0.6.0 does not include a synthetic Cowork
+contract fixture.
 
 ## Typed HTTP intents
 
