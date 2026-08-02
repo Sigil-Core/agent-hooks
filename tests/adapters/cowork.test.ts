@@ -3,7 +3,7 @@ import {
   createCoworkPreToolUseHook,
   type CoworkPreToolUsePayload,
 } from '../../src/adapters/cowork.js';
-import * as pkg from '../../src/index.js';
+import { createCoworkPreToolUseHook as exportedCoworkHook } from '../../src/index.js';
 import type { SigilHookConfig } from '../../src/types.js';
 
 const BASE_CONFIG: SigilHookConfig = {
@@ -18,6 +18,26 @@ const deny = (code: string, message: string) => ({
     permissionDecisionReason: `${code}: ${message}`,
   },
 });
+
+interface CoworkRequestBody {
+  framework: string;
+  intent: {
+    action: string;
+    command?: string;
+    task_id?: string;
+    metadata: {
+      cowork: {
+        coverage: string;
+      };
+    };
+  };
+}
+
+function requestBodyAt(index: number): CoworkRequestBody {
+  const call = vi.mocked(fetch).mock.calls[index];
+  if (!call) throw new Error(`Missing fetch call at index ${index}`);
+  return JSON.parse((call[1] as RequestInit).body as string) as CoworkRequestBody;
+}
 
 describe('createCoworkPreToolUseHook', () => {
   beforeEach(() => {
@@ -66,7 +86,7 @@ describe('createCoworkPreToolUseHook', () => {
       model: 'claude-sonnet-4',
     });
 
-    const body = JSON.parse((vi.mocked(fetch).mock.calls[0]![1] as RequestInit).body as string);
+    const body = requestBodyAt(0);
     expect(body.framework).toBe('cowork');
     expect(body.intent.action).toBe('bash');
     expect(body.intent.command).toBe('npm test');
@@ -214,6 +234,6 @@ describe('createCoworkPreToolUseHook', () => {
   });
 
   it('is re-exported from the package index', () => {
-    expect(pkg.createCoworkPreToolUseHook).toBe(createCoworkPreToolUseHook);
+    expect(exportedCoworkHook).toBe(createCoworkPreToolUseHook);
   });
 });
