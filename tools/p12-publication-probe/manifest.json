@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "sigil-agent-hooks-p12-publication-probe/v1",
+  "repository": "Sigil-Core/agent-hooks",
+  "sourceCommit": "9267648c6776d39bc802ca33420a48dd22da39dd",
+  "workflow": "publish.yml",
+  "workflowJob": "stage-publish",
+  "branchRef": "refs/heads/release/s12-emergency",
+  "environment": "s12-emergency-publish",
+  "packageName": "@sigilcore/agent-hooks-publication-probe",
+  "bootstrapVersion": "0.0.0-p12-bootstrap-r2.20260808",
+  "oidcVersion": "0.0.0-p12-oidc-r2.20260808",
+  "distTag": "s12-probe",
+  "npmVersion": "11.17.0",
+  "modes": [
+    "dry-run",
+    "stage-publish"
+  ],
+  "expectedPacklist": [
+    "README.md",
+    "package.json",
+    "probe.json"
+  ],
+  "allowedChangedFiles": [
+    ".github/workflows/publish.yml",
+    "scripts/p12-publication-probe/check.mjs",
+    "tests/p12-publication-probe.test.ts",
+    "tools/p12-publication-probe/bootstrap/README.md",
+    "tools/p12-publication-probe/bootstrap/package.json",
+    "tools/p12-publication-probe/bootstrap/probe.json",
+    "tools/p12-publication-probe/manifest.json",
+    "tools/p12-publication-probe/oidc/README.md",
+    "tools/p12-publication-probe/oidc/package.json",
+    "tools/p12-publication-probe/oidc/probe.json"
+  ],
+  "bootstrapDirectory": "tools/p12-publication-probe/bootstrap",
+  "oidcDirectory": "tools/p12-publication-probe/oidc"
+}

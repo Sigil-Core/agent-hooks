@@ -5,14 +5,23 @@ on:
     types:
       - published
   workflow_dispatch:
-
-permissions:
-  contents: read
-  id-token: write
+    inputs:
+      mode:
+        description: P-12 publication probe mode
+        required: true
+        type: choice
+        default: dry-run
+        options:
+          - dry-run
+          - stage-publish
 
 jobs:
   publish:
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -49,3 +58,112 @@ jobs:
       - name: Publish to npm
         if: steps.published.outputs.already_published != 'true'
         run: npm publish --access public
+
+  stage-publish:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: s12-emergency-publish
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      P12_EXPECTED_REF: refs/heads/release/s12-emergency
+      P12_MODE: ${{ inputs.mode }}
+      P12_PACKAGE_NAME: '@sigilcore/agent-hooks-publication-probe'
+      P12_BOOTSTRAP_VERSION: 0.0.0-p12-bootstrap-r2.20260808
+      P12_OIDC_VERSION: 0.0.0-p12-oidc-r2.20260808
+      P12_DIST_TAG: s12-probe
+      P12_NPM_VERSION: 11.17.0
+      P12_PROBE_DIRECTORY: tools/p12-publication-probe/oidc
+    steps:
+      - name: Reject every ref and mode outside the P-12 contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "${P12_EXPECTED_REF}" ]; then
+            echo "P-12 publication probe rejects ref ${GITHUB_REF}." >&2
+            exit 64
+          fi
+          case "${P12_MODE}" in
+            dry-run|stage-publish) ;;
+            *)
+              echo "P-12 publication probe rejects mode ${P12_MODE}." >&2
+              exit 64
+              ;;
+          esac
+
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org/
+
+      - name: Pin npm for trusted publication
+        run: |
+          set -euo pipefail
+          npm install -g "npm@${P12_NPM_VERSION}"
+          test "$(npm --version)" = "${P12_NPM_VERSION}"
+
+      - name: Recheck immutable P-12 inputs from reviewed bytes
+        run: |
+          set -euo pipefail
+          node scripts/p12-publication-probe/check.mjs guard \
+            --ref "${GITHUB_REF}" \
+            --mode "${P12_MODE}"
+          node scripts/p12-publication-probe/check.mjs static
+          node scripts/p12-publication-probe/check.mjs changed-files
+
+      - name: Run package-defined checks
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+
+      - name: Verify exact probe packlists
+        run: node scripts/p12-publication-probe/check.mjs packlist
+
+      - name: Pack the exact OIDC probe and record its digest
+        id: probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/p12-probe"
+          npm pack "./${P12_PROBE_DIRECTORY}" \
+            --ignore-scripts \
+            --json \
+            --pack-destination "${RUNNER_TEMP}/p12-probe" \
+            > "${RUNNER_TEMP}/p12-probe-pack.json"
+          tarball_name="$(node -p \
+            "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))[0].filename" \
+            "${RUNNER_TEMP}/p12-probe-pack.json")"
+          tarball_path="${RUNNER_TEMP}/p12-probe/${tarball_name}"
+          tarball_sha256="$(sha256sum "${tarball_path}" | awk '{print $1}')"
+          echo "tarball=${tarball_name}" >> "${GITHUB_OUTPUT}"
+          echo "sha256=${tarball_sha256}" >> "${GITHUB_OUTPUT}"
+          echo "Prepared ${P12_PACKAGE_NAME}@${P12_OIDC_VERSION} ${tarball_name} sha256=${tarball_sha256}."
+
+      - name: Dry-run stops immediately before stage publication
+        if: inputs.mode == 'dry-run'
+        run: |
+          echo "Dry run complete. No npm publish command was executed."
+          echo "Prepared artifact sha256=${{ steps.probe.outputs.sha256 }}."
+
+      - name: Publish exact OIDC probe under the non-production tag
+        if: inputs.mode == 'stage-publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarball_path="${RUNNER_TEMP}/p12-probe/${{ steps.probe.outputs.tarball }}"
+          test -f "${tarball_path}"
+          test "$(sha256sum "${tarball_path}" | awk '{print $1}')" = "${{ steps.probe.outputs.sha256 }}"
+          npm publish "${tarball_path}" \
+            --access public \
+            --tag "${P12_DIST_TAG}" \
+            --provenance

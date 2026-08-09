@@ -1,0 +1,18 @@
+{
+  "name": "@sigilcore/agent-hooks-publication-probe",
+  "version": "0.0.0-p12-oidc-r2.20260808",
+  "description": "Temporary P-12 OIDC publication probe for the retained Agent Hooks S12 release branch.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sigil-Core/agent-hooks.git"
+  },
+  "files": [
+    "README.md",
+    "probe.json"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "s12-probe"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "sigil-agent-hooks-p12-publication-probe/v1",
+  "kind": "bootstrap",
+  "package": "@sigilcore/agent-hooks-publication-probe",
+  "version": "0.0.0-p12-bootstrap-r2.20260808",
+  "branchRef": "refs/heads/release/s12-emergency",
+  "distTag": "s12-probe"
+}
