@@ -266,6 +266,22 @@ describe('P-12 publication probe', () => {
     expect(result.stderr).toContain('must declare exactly one of uses or run');
   });
 
+  it('rejects a workflow step that declares both uses and run', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-ambiguous-step-'));
+    const path = join(directory, 'publish.yml');
+    const checkout =
+      '      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5';
+    const mutated = workflow.replace(checkout, `${checkout}\n        run: echo invalid`);
+    expect(mutated).not.toBe(workflow);
+    writeFileSync(path, mutated);
+    const result = spawnSync(process.execPath, [checkScript, 'workflow-plan', '--workflow', path], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must declare exactly one of uses or run');
+  });
+
   it('rejects a manual plan with its runtime ref and mode guard removed', () => {
     const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-no-runtime-guard-'));
     const path = join(directory, 'publish.yml');
