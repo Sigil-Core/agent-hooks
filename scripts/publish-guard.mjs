@@ -150,8 +150,8 @@ export function parseWorkflow(source) {
         }
       }
       const steps = stepStarts.map((start, stepPosition) => {
-        const end = stepStarts[stepPosition + 1] ?? jobLines.length;
-        return parseStep(jobLines.slice(start, end), job.id);
+        const stepEnd = stepStarts[stepPosition + 1] ?? jobLines.length;
+        return parseStep(jobLines.slice(start, stepEnd), job.id);
       });
       const environmentValue = field(jobLines, 4, 'environment');
       const environment = environmentValue === ''
