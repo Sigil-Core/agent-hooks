@@ -249,6 +249,23 @@ describe('P-12 publication probe', () => {
     expect(plan.manualDispatchPublications[0].command).toContain('npm stage publish');
   });
 
+  it('rejects immediate publication when staged text appears only in a shell comment', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-stage-comment-bypass-'));
+    const path = join(directory, 'publish.yml');
+    const mutated = workflow.replace(
+      '          npm stage publish "${tarball_path}" \\\n',
+      '          npm publish "${tarball_path}" --provenance # npm stage publish "${tarball_path}" \\\n',
+    );
+    expect(mutated).not.toBe(workflow);
+    writeFileSync(path, mutated);
+    const result = spawnSync(process.execPath, [checkScript, 'workflow-plan', '--workflow', path], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('manual publication must stage the recorded tarball path');
+  });
+
   it('rejects a workflow step that declares neither uses nor run', () => {
     const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-unsupported-step-'));
     const path = join(directory, 'publish.yml');

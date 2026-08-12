@@ -367,7 +367,12 @@ function validateWorkflowPlan(plan) {
   assert(runtimeGuards.length === 1, `expected one manual runtime guard step, got ${runtimeGuards.length}`);
   const publication = manualPublications[0];
   assert(publication.if === "inputs.mode == 'stage-publish'", 'manual publication mode guard drifted');
-  assert(publication.command.includes('npm stage publish "${tarball_path}"'), 'manual publication must stage the recorded tarball path');
+  const publicationTokens = publication.command.trim().split(/\s+/);
+  assert(
+    JSON.stringify(publicationTokens.slice(0, 4)) ===
+      JSON.stringify(['npm', 'stage', 'publish', '"${tarball_path}"']),
+    'manual publication must stage the recorded tarball path',
+  );
   assert(publication.command.includes('--tag "${P12_DIST_TAG}"'), 'manual publication tag drifted');
   assert(publication.command.includes('--provenance'), 'manual publication provenance drifted');
   assert(!publication.command.includes('latest'), 'manual publication routes to latest');
