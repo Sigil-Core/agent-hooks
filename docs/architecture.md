@@ -33,10 +33,24 @@ token. The trust chain is:
 
 1. `.github/workflows/publish.yml` runs on GitHub-hosted Actions.
 2. The workflow requests an OIDC token via `permissions.id-token: write`.
-3. npm validates the trusted publisher configuration for
+3. The workflow names the `npm-production` GitHub environment. A protected
+   environment and the matching npm trusted-publisher environment must be
+   configured before this is an effective human release gate.
+4. npm validates the trusted publisher configuration for
    `Sigil-Core/agent-hooks` and `publish.yml`.
-4. `npm publish --access public` publishes `@sigilcore/agent-hooks` with
-   provenance.
+5. `npm publish --access public --provenance` publishes
+   `@sigilcore/agent-hooks` with a provenance attestation.
+
+The P-12 probe is intentionally separate from production publication. Its
+manual workflow path may issue one `npm stage publish` command under a
+non-latest tag. The reusable `scripts/publish-guard.mjs` check rejects direct,
+duplicate, or hidden publication commands and keeps the bootstrap rollback tag
+available for acceptance and rollback.
+
+The production package has one npm trusted publisher. A temporary P-12 probe
+package needs a separate publisher record restricted to staged publication;
+its setup is an external rollout prerequisite and is not changed by this
+repository patch.
 
 The `repository.url` in `package.json` is part of that trust boundary and must
 remain `git+https://github.com/Sigil-Core/agent-hooks.git`.
