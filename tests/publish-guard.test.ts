@@ -46,7 +46,7 @@ describe('npm publication guard', () => {
   });
 
   it('accepts one manual P-12 stage publish and rejects direct publish', () => {
-    const tarballReference = '$' + '{TARBALL}';
+    const tarballReference = ['$', '{TARBALL}'].join('');
     const manualJob = `
   stage-publish:
     if: github.event_name == 'workflow_dispatch'
