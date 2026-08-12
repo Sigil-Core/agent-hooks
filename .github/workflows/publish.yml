@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
@@ -96,6 +97,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
@@ -149,13 +151,13 @@ jobs:
           echo "sha256=${tarball_sha256}" >> "${GITHUB_OUTPUT}"
           echo "Prepared ${P12_PACKAGE_NAME}@${P12_OIDC_VERSION} ${tarball_name} sha256=${tarball_sha256}."
 
-      - name: Dry-run stops immediately before stage publication
+      - name: Dry-run stops immediately before staged submission
         if: inputs.mode == 'dry-run'
         run: |
-          echo "Dry run complete. No npm publish command was executed."
+          echo "Dry run complete. No npm publication command was executed."
           echo "Prepared artifact sha256=${{ steps.probe.outputs.sha256 }}."
 
-      - name: Publish exact OIDC probe under the non-production tag
+      - name: Stage exact OIDC probe under the non-production tag
         if: inputs.mode == 'stage-publish'
         shell: bash
         run: |
@@ -163,7 +165,7 @@ jobs:
           tarball_path="${RUNNER_TEMP}/p12-probe/${{ steps.probe.outputs.tarball }}"
           test -f "${tarball_path}"
           test "$(sha256sum "${tarball_path}" | awk '{print $1}')" = "${{ steps.probe.outputs.sha256 }}"
-          npm publish "${tarball_path}" \
+          npm stage publish "${tarball_path}" \
             --access public \
             --tag "${P12_DIST_TAG}" \
             --provenance

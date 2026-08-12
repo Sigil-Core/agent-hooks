@@ -14,6 +14,7 @@ const manifestPath = resolve(
 );
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 const expectedAllowedChangedFiles = [
+  '.github/workflows/ci.yml',
   '.github/workflows/publish.yml',
   'scripts/p12-publication-probe/check.mjs',
   'tests/p12-publication-probe.test.ts',
@@ -241,7 +242,7 @@ function normalizeRun(stepLines, firstKey, firstValue) {
   const inline = firstKey === 'run'
     ? firstValue
     : stepLines[runLine].slice('        run:'.length).trim();
-  if (inline && !/^[>|][+-]?$/.test(inline)) {
+  if (inline && !/^[>|][+-]?(?:\s+#.*)?$/.test(inline)) {
     return inline;
   }
   return stepLines
@@ -264,7 +265,7 @@ function shellCommands(run) {
 }
 
 function publishCommands(run) {
-  return shellCommands(run).filter((command) => /^npm\s+publish(?:\s|$)/.test(command));
+  return shellCommands(run).filter((command) => /^npm\s+(?:stage\s+)?publish(?:\s|$)/.test(command));
 }
 
 function normalizeWorkflow(workflowPath) {
@@ -302,10 +303,18 @@ function normalizeWorkflow(workflowPath) {
         ? firstValue
         : blockField(stepLines, 8, 'name') ?? `${firstKey} step`;
       const run = normalizeRun(stepLines, firstKey, firstValue);
+      const uses = firstKey === 'uses' ? firstValue : blockField(stepLines, 8, 'uses');
+      assert(
+        (run === null) !== (uses === null),
+        `workflow job ${job.id} step ${name} must declare exactly one of uses or run`,
+      );
       const normalizedPublishCommands = publishCommands(run);
       return {
         name,
-        uses: firstKey === 'uses' ? firstValue : blockField(stepLines, 8, 'uses'),
+        uses,
+        fetchDepth: uses?.startsWith('actions/checkout@')
+          ? blockField(stepLines, 10, 'fetch-depth')
+          : null,
         if: firstKey === 'if' ? firstValue : blockField(stepLines, 8, 'if'),
         run,
         publishCommands: normalizedPublishCommands,
@@ -328,6 +337,9 @@ function validateWorkflowPlan(plan) {
   const manualJob = manualJobs[0];
   assert(manualJob.id === manifest.workflowJob, 'manual publication job drifted');
   assert(manualJob.environment === manifest.environment, 'manual publication environment drifted');
+  const manualCheckouts = manualJob.steps.filter((step) => step.uses?.startsWith('actions/checkout@'));
+  assert(manualCheckouts.length === 1, `expected one manual checkout step, got ${manualCheckouts.length}`);
+  assert(manualCheckouts[0].fetchDepth === '0', 'manual checkout must fetch full history');
   const releaseJobs = plan.jobs.filter((job) => job.if === "github.event_name == 'release'");
   assert(releaseJobs.length === 1, `expected one release job, got ${releaseJobs.length}`);
   const releaseJob = releaseJobs[0];
@@ -355,7 +367,12 @@ function validateWorkflowPlan(plan) {
   assert(runtimeGuards.length === 1, `expected one manual runtime guard step, got ${runtimeGuards.length}`);
   const publication = manualPublications[0];
   assert(publication.if === "inputs.mode == 'stage-publish'", 'manual publication mode guard drifted');
-  assert(publication.command.includes('npm publish "${tarball_path}"'), 'manual publication must use the recorded tarball path');
+  const publicationTokens = publication.command.trim().split(/\s+/);
+  assert(
+    JSON.stringify(publicationTokens.slice(0, 4)) ===
+      JSON.stringify(['npm', 'stage', 'publish', '"${tarball_path}"']),
+    'manual publication must stage the recorded tarball path',
+  );
   assert(publication.command.includes('--tag "${P12_DIST_TAG}"'), 'manual publication tag drifted');
   assert(publication.command.includes('--provenance'), 'manual publication provenance drifted');
   assert(!publication.command.includes('latest'), 'manual publication routes to latest');

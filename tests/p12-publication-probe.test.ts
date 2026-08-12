@@ -20,6 +20,7 @@ const manifest = JSON.parse(
 );
 const workflow = readFileSync(resolve(root, '.github/workflows/publish.yml'), 'utf8');
 const allowedChangedFiles = [
+  '.github/workflows/ci.yml',
   '.github/workflows/publish.yml',
   'scripts/p12-publication-probe/check.mjs',
   'tests/p12-publication-probe.test.ts',
@@ -138,7 +139,7 @@ describe('P-12 publication probe', () => {
     }
   });
 
-  it('normalizes the complete manual-dispatch plan and permits one exact tarball publication', () => {
+  it('normalizes the complete manual-dispatch plan and permits one exact tarball staged submission', () => {
     const result = spawnSync(process.execPath, [checkScript, 'workflow-plan'], {
       cwd: root,
       encoding: 'utf8',
@@ -159,12 +160,16 @@ describe('P-12 publication probe', () => {
       if: "inputs.mode == 'stage-publish'",
       publishes: true,
     });
-    expect(plan.manualDispatchPublications[0].command).toContain('npm publish "${tarball_path}"');
+    expect(plan.manualDispatchPublications[0].command).toContain('npm stage publish "${tarball_path}"');
     expect(plan.manualDispatchPublications[0].command).toContain('--tag "${P12_DIST_TAG}"');
     expect(plan.manualDispatchPublications[0].command).toContain('--provenance');
     expect(plan.manualDispatchPublications[0].command).not.toContain('latest');
+    const manualJob = plan.jobs.find((job: { id: string }) => job.id === 'stage-publish');
+    const checkout = manualJob.steps.find((step: { uses?: string }) =>
+      step.uses?.startsWith('actions/checkout@'));
+    expect(checkout.fetchDepth).toBe('0');
     expect(workflow).toContain("if: inputs.mode == 'dry-run'");
-    expect(workflow).toContain('Dry run complete. No npm publish command was executed.');
+    expect(workflow).toContain('Dry run complete. No npm publication command was executed.');
     expect(workflow).not.toContain('NPM_TOKEN');
   });
 
@@ -172,10 +177,10 @@ describe('P-12 publication probe', () => {
     const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-'));
     const path = join(directory, 'publish.yml');
     const mutated = workflow.replace(
-      '      - name: Publish exact OIDC probe under the non-production tag',
+      '      - name: Stage exact OIDC probe under the non-production tag',
       '      - name: Forbidden second manual publication\n' +
         '        run: npm publish --access public\n\n' +
-        '      - name: Publish exact OIDC probe under the non-production tag',
+        '      - name: Stage exact OIDC probe under the non-production tag',
     );
     writeFileSync(path, mutated);
     const result = spawnSync(process.execPath, [checkScript, 'workflow-plan', '--workflow', path], {
@@ -190,9 +195,9 @@ describe('P-12 publication probe', () => {
     const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-run-first-'));
     const path = join(directory, 'publish.yml');
     const mutated = workflow.replace(
-      '      - name: Publish exact OIDC probe under the non-production tag',
+      '      - name: Stage exact OIDC probe under the non-production tag',
       '      - run: npm publish --access public\n\n' +
-        '      - name: Publish exact OIDC probe under the non-production tag',
+        '      - name: Stage exact OIDC probe under the non-production tag',
     );
     writeFileSync(path, mutated);
     const result = spawnSync(process.execPath, [checkScript, 'workflow-plan', '--workflow', path], {
@@ -217,6 +222,82 @@ describe('P-12 publication probe', () => {
     });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('expected one manual publication step, got 2');
+  });
+
+  it('keeps a commented block scalar body visible to publication validation', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-commented-block-'));
+    const path = join(directory, 'publish.yml');
+    const mutated = workflow.replace(
+      '      - name: Stage exact OIDC probe under the non-production tag\n' +
+        "        if: inputs.mode == 'stage-publish'\n" +
+        '        shell: bash\n' +
+        '        run: |',
+      '      - name: Stage exact OIDC probe under the non-production tag\n' +
+        "        if: inputs.mode == 'stage-publish'\n" +
+        '        shell: bash\n' +
+        '        run: | # reviewed block',
+    );
+    expect(mutated).not.toBe(workflow);
+    writeFileSync(path, mutated);
+    const result = spawnSync(process.execPath, [checkScript, 'workflow-plan', '--workflow', path], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const plan = JSON.parse(result.stdout.slice(result.stdout.indexOf('{')));
+    expect(plan.manualDispatchPublications).toHaveLength(1);
+    expect(plan.manualDispatchPublications[0].command).toContain('npm stage publish');
+  });
+
+  it('rejects immediate publication when staged text appears only in a shell comment', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-stage-comment-bypass-'));
+    const path = join(directory, 'publish.yml');
+    const mutated = workflow.replace(
+      '          npm stage publish "${tarball_path}" \\\n',
+      '          npm publish "${tarball_path}" --provenance # npm stage publish "${tarball_path}" \\\n',
+    );
+    expect(mutated).not.toBe(workflow);
+    writeFileSync(path, mutated);
+    const result = spawnSync(process.execPath, [checkScript, 'workflow-plan', '--workflow', path], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('manual publication must stage the recorded tarball path');
+  });
+
+  it('rejects a workflow step that declares neither uses nor run', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-unsupported-step-'));
+    const path = join(directory, 'publish.yml');
+    const mutated = workflow.replace(
+      '      - name: Stage exact OIDC probe under the non-production tag',
+      '      - name: Metadata-only unsupported step\n' +
+        "        if: inputs.mode == 'stage-publish'\n\n" +
+        '      - name: Stage exact OIDC probe under the non-production tag',
+    );
+    writeFileSync(path, mutated);
+    const result = spawnSync(process.execPath, [checkScript, 'workflow-plan', '--workflow', path], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must declare exactly one of uses or run');
+  });
+
+  it('rejects a workflow step that declares both uses and run', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'p12-workflow-ambiguous-step-'));
+    const path = join(directory, 'publish.yml');
+    const checkout =
+      '      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5';
+    const mutated = workflow.replace(checkout, `${checkout}\n        run: echo invalid`);
+    expect(mutated).not.toBe(workflow);
+    writeFileSync(path, mutated);
+    const result = spawnSync(process.execPath, [checkScript, 'workflow-plan', '--workflow', path], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must declare exactly one of uses or run');
   });
 
   it('rejects a manual plan with its runtime ref and mode guard removed', () => {
