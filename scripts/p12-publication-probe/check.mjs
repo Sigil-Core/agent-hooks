@@ -14,6 +14,7 @@ const manifestPath = resolve(
 );
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 const expectedAllowedChangedFiles = [
+  '.github/workflows/ci.yml',
   '.github/workflows/publish.yml',
   'scripts/p12-publication-probe/check.mjs',
   'tests/p12-publication-probe.test.ts',

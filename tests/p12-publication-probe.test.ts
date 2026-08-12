@@ -20,6 +20,7 @@ const manifest = JSON.parse(
 );
 const workflow = readFileSync(resolve(root, '.github/workflows/publish.yml'), 'utf8');
 const allowedChangedFiles = [
+  '.github/workflows/ci.yml',
   '.github/workflows/publish.yml',
   'scripts/p12-publication-probe/check.mjs',
   'tests/p12-publication-probe.test.ts',
