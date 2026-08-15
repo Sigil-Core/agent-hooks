@@ -49,8 +49,16 @@ export type ResponseClass =
 
 export type VerifiedResponsePolicyV1 = VerifiedCompiledResponsePolicyFormat1;
 
+export interface TrustedResultBindings {
+  authorizationBinding: string;
+  requestIdDigest: string;
+  requestDigest: string;
+  resultDigest: string;
+}
+
 export interface CheckResultInput {
   verifiedPolicy: VerifiedResponsePolicyV1;
+  trustedBindings: TrustedResultBindings;
   authorizationBinding: string;
   executionId: string;
   requestIdDigest: string;
@@ -459,6 +467,7 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
     const now = input.nowUnixSeconds ?? Math.floor(Date.now() / 1000);
     if (!validPolicy(policy)) return Object.freeze(decision);
     if (
+      !isRecord(input.trustedBindings) ||
       typeof input.executionId !== 'string' ||
       !HEX_32.test(input.executionId) ||
       typeof input.requestIdDigest !== 'string' ||
@@ -480,6 +489,15 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
       typeof input.taskId !== 'string' ||
       input.taskId === '' ||
       input.contentType !== CALL_TOOL_RESULT_CONTENT_TYPE
+    ) {
+      decision.reason = 'binding_mismatch';
+      return Object.freeze(decision);
+    }
+    if (
+      !sameString(input.authorizationBinding, input.trustedBindings.authorizationBinding) ||
+      !sameString(input.requestIdDigest, input.trustedBindings.requestIdDigest) ||
+      !sameString(input.requestDigest, input.trustedBindings.requestDigest) ||
+      !sameString(input.resultDigest, input.trustedBindings.resultDigest)
     ) {
       decision.reason = 'binding_mismatch';
       return Object.freeze(decision);

@@ -129,12 +129,19 @@ function resultInput(): Omit<CheckResultInput, 'verifiedPolicy'> {
     content: [{ type: 'text', text: 'ordinary output' }],
   });
   if (!projected.ok) throw new Error(projected.reason);
-  return {
+  const trustedBindings = {
     authorizationBinding: '4'.repeat(64),
-    executionId: '0123456789abcdef0123456789abcdef',
     requestIdDigest: '5'.repeat(64),
     requestDigest: '6'.repeat(64),
     resultDigest: '7'.repeat(64),
+  };
+  return {
+    trustedBindings,
+    authorizationBinding: trustedBindings.authorizationBinding,
+    executionId: '0123456789abcdef0123456789abcdef',
+    requestIdDigest: trustedBindings.requestIdDigest,
+    requestDigest: trustedBindings.requestDigest,
+    resultDigest: trustedBindings.resultDigest,
     contentType: CALL_TOOL_RESULT_CONTENT_TYPE,
     idempotencyKey: 'result:once',
     tool: 'example.fetch',

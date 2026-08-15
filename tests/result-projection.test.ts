@@ -76,13 +76,20 @@ function input(
   responsePolicy: VerifiedResponsePolicyV1,
   projected: ResultProjectionV1,
 ): CheckResultInput {
-  return {
-    verifiedPolicy: responsePolicy,
+  const trustedBindings = {
     authorizationBinding: digest('authorization'),
-    executionId: '0123456789abcdef0123456789abcdef',
     requestIdDigest: digest('request id'),
     requestDigest: digest('request'),
     resultDigest: digest('result'),
+  };
+  return {
+    verifiedPolicy: responsePolicy,
+    trustedBindings,
+    authorizationBinding: trustedBindings.authorizationBinding,
+    executionId: '0123456789abcdef0123456789abcdef',
+    requestIdDigest: trustedBindings.requestIdDigest,
+    requestDigest: trustedBindings.requestDigest,
+    resultDigest: trustedBindings.resultDigest,
     contentType: CALL_TOOL_RESULT_CONTENT_TYPE,
     idempotencyKey: 'result:once',
     tool: 'example.fetch',
@@ -118,16 +125,21 @@ describe('MCP CallToolResult projection v1', () => {
     const second = projectCallToolResult({
       structuredContent: { a: ['é', true], z: 1 },
       content: [
-        { annotations: {}, text: 'alpha', type: 'text' },
-        { resource: { text: 'beta', uri: 'file:///x' }, type: 'resource' },
+        { annotations: { audience: ['user'] }, text: 'alpha', type: 'text' },
+        {
+          resource: { text: 'beta', uri: 'file:///x', mimeType: 'text/plain' },
+          type: 'resource',
+        },
         {
           description: 'link',
           title: 'Example',
           name: 'example',
           uri: 'https://example.test',
           type: 'resource_link',
+          _meta: { withheld: true },
         },
       ],
+      _meta: { neverProjected: 'secret' },
     });
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
@@ -135,12 +147,17 @@ describe('MCP CallToolResult projection v1', () => {
     expect(Buffer.from(first.projection.bytes)).toEqual(Buffer.from(second.projection.bytes));
     expect(first.projection.records.map(({ path, value }) => ({ path, value }))).toEqual([
       { path: '/content/0/text', value: 'alpha' },
+      { path: '/content/0/annotations', value: '{"audience":["user"]}' },
+      { path: '/content/1/resource/uri', value: 'file:///x' },
       { path: '/content/1/resource/text', value: 'beta' },
+      { path: '/content/1/resource/mimeType', value: 'text/plain' },
       { path: '/content/2/uri', value: 'https://example.test' },
       { path: '/content/2/name', value: 'example' },
       { path: '/content/2/title', value: 'Example' },
       { path: '/content/2/description', value: 'link' },
+      { path: '/content/2/_meta', value: '{"withheld":true}' },
       { path: '/structuredContent', value: '{"a":["é",true],"z":1}' },
+      { path: '/_meta', value: '{"neverProjected":"secret"}' },
     ]);
     expect(first.projection.digest).toBe(
       createHash('sha256').update(first.projection.bytes).digest('hex'),
@@ -202,15 +219,21 @@ describe('MCP CallToolResult projection v1', () => {
     expect(getterCalls).toBe(0);
   });
 
-  it('accepts exactly 16 MiB of value bytes and rejects one byte more', () => {
+  it('caps the complete framed projection at exactly 16 MiB', () => {
+    const frameOverhead = 51;
     const atLimit = projectCallToolResult({
-      content: [{ type: 'text', text: 'a'.repeat(MAX_RESULT_PROJECTION_BYTES) }],
+      content: [
+        { type: 'text', text: 'a'.repeat(MAX_RESULT_PROJECTION_BYTES - frameOverhead) },
+      ],
     });
     expect(atLimit.ok).toBe(true);
     expect(
       projectCallToolResult({
         content: [
-          { type: 'text', text: 'a'.repeat(MAX_RESULT_PROJECTION_BYTES + 1) },
+          {
+            type: 'text',
+            text: 'a'.repeat(MAX_RESULT_PROJECTION_BYTES - frameOverhead + 1),
+          },
         ],
       }),
     ).toEqual({ ok: false, reason: 'projection_limit' });
@@ -310,6 +333,20 @@ describe('checkResult format 1', () => {
   ] as const)('fails closed on a %s binding mismatch', (field, value) => {
     const candidate = input(policy(), projection('clean'));
     Object.assign(candidate, { [field]: value });
+    expect(checkResult(candidate)).toMatchObject({
+      disposition: 'BLOCK',
+      reason: 'binding_mismatch',
+    });
+  });
+
+  it.each([
+    'authorizationBinding',
+    'requestIdDigest',
+    'requestDigest',
+    'resultDigest',
+  ] as const)('fails closed when %s differs from its trusted binding', (field) => {
+    const candidate = input(policy(), projection('clean'));
+    candidate.trustedBindings = { ...candidate.trustedBindings, [field]: digest(`other ${field}`) };
     expect(checkResult(candidate)).toMatchObject({
       disposition: 'BLOCK',
       reason: 'binding_mismatch',

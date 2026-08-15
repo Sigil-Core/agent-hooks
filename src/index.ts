@@ -97,6 +97,7 @@ export type {
   ResponseDecisionReason,
   ResponseDecisionV1,
   ResponseFinding,
+  TrustedResultBindings,
   VerifiedResponsePolicyV1,
 } from './check-result.js';
 export type {

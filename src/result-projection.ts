@@ -157,6 +157,26 @@ function appendString(
   return true;
 }
 
+function appendCanonical(
+  records: PendingRecord[],
+  path: string,
+  value: unknown,
+): void {
+  records.push({ path, value: canonicalJson(value) });
+}
+
+function appendOptionalMetadata(
+  value: Record<string, unknown>,
+  basePath: string,
+  records: PendingRecord[],
+): void {
+  for (const field of ['annotations', '_meta'] as const) {
+    if (Object.hasOwn(value, field)) {
+      appendCanonical(records, `${basePath}/${field}`, value[field]);
+    }
+  }
+}
+
 function collectContentRecord(
   block: unknown,
   index: number,
@@ -165,22 +185,30 @@ function collectContentRecord(
   if (!isRecord(block) || typeof block.type !== 'string') return false;
   if (block.type === 'text') {
     if (!hasOnlyKeys(block, ['type', 'text', 'annotations', '_meta'])) return false;
-    return appendString(records, `/content/${index}/text`, block.text);
+    if (!appendString(records, `/content/${index}/text`, block.text)) return false;
+    appendOptionalMetadata(block, `/content/${index}`, records);
+    return true;
   }
   if (block.type === 'resource') {
     if (
       !hasOnlyKeys(block, ['type', 'resource', 'annotations', '_meta']) ||
       !isRecord(block.resource) ||
       !hasOnlyKeys(block.resource, ['uri', 'text', 'mimeType', '_meta']) ||
+      !Object.hasOwn(block.resource, 'uri') ||
+      !Object.hasOwn(block.resource, 'text') ||
       Object.hasOwn(block.resource, 'blob')
     ) {
       return false;
     }
-    return appendString(
-      records,
-      `/content/${index}/resource/text`,
-      block.resource.text,
-    );
+    for (const field of ['uri', 'text', 'mimeType'] as const) {
+      if (!Object.hasOwn(block.resource, field)) continue;
+      if (!appendString(records, `/content/${index}/resource/${field}`, block.resource[field])) {
+        return false;
+      }
+    }
+    appendOptionalMetadata(block.resource, `/content/${index}/resource`, records);
+    appendOptionalMetadata(block, `/content/${index}`, records);
+    return true;
   }
   if (block.type === 'resource_link') {
     if (
@@ -196,39 +224,47 @@ function collectContentRecord(
         'annotations',
         '_meta',
       ])
+      || !Object.hasOwn(block, 'uri')
+      || !Object.hasOwn(block, 'name')
     ) {
       return false;
     }
     let found = false;
-    for (const field of ['uri', 'name', 'title', 'description'] as const) {
+    for (const field of ['uri', 'name', 'title', 'description', 'mimeType'] as const) {
       if (!Object.hasOwn(block, field)) continue;
       if (!appendString(records, `/content/${index}/${field}`, block[field])) return false;
       found = true;
     }
+    for (const field of ['size', 'icons'] as const) {
+      if (!Object.hasOwn(block, field)) continue;
+      appendCanonical(records, `/content/${index}/${field}`, block[field]);
+      found = true;
+    }
+    appendOptionalMetadata(block, `/content/${index}`, records);
     return found;
   }
   return false;
 }
 
 function frameRecords(pending: readonly PendingRecord[]): ResultProjectionV1 | null {
-  const count = Buffer.allocUnsafe(4);
+  const count = Buffer.alloc(4);
   count.writeUInt32BE(pending.length);
   const chunks: Buffer[] = [PROJECTION_MAGIC, count];
   const records: ResultProjectionRecord[] = [];
   let offset = PROJECTION_MAGIC.length + count.length;
-  let projectedValueBytes = 0;
 
   for (const record of pending) {
+    const pathBytes = Buffer.byteLength(record.path, 'utf8');
+    const valueBytes = Buffer.byteLength(record.value, 'utf8');
+    const end = offset + 4 + pathBytes + 8 + valueBytes;
+    if (end > MAX_RESULT_PROJECTION_BYTES) return null;
     const path = Buffer.from(record.path, 'utf8');
     const value = Buffer.from(record.value, 'utf8');
-    const pathLength = Buffer.allocUnsafe(4);
+    const pathLength = Buffer.alloc(4);
     pathLength.writeUInt32BE(path.length);
-    const valueLength = Buffer.allocUnsafe(8);
+    const valueLength = Buffer.alloc(8);
     valueLength.writeBigUInt64BE(BigInt(value.length));
     const start = offset + 4 + path.length + 8;
-    const end = start + value.length;
-    projectedValueBytes += value.length;
-    if (projectedValueBytes > MAX_RESULT_PROJECTION_BYTES) return null;
     chunks.push(pathLength, path, valueLength, value);
     records.push({ path: record.path, value: record.value, start, end });
     offset = end;
@@ -278,6 +314,9 @@ export function projectCallToolResult(result: unknown): ProjectCallToolResult {
         path: '/structuredContent',
         value: canonicalJson(result.structuredContent),
       });
+    }
+    if (Object.hasOwn(result, '_meta')) {
+      appendCanonical(records, '/_meta', result._meta);
     }
     const projection = frameRecords(records);
     return projection
