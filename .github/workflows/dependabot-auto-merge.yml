@@ -4,75 +4,39 @@ on: pull_request
 
 permissions:
   contents: write
-  checks: read
-  issues: read
   pull-requests: write
 
 jobs:
   auto-merge:
+    name: Enable auto-merge on green Dependabot PRs
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    if: github.actor == 'dependabot[bot]'
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
-        uses: dependabot/fetch-metadata@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Wait for one qualifying completed review
-        if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          REPOSITORY: ${{ github.repository }}
-        shell: bash
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+      # Major bumps are excluded on purpose: they wait for the nightly
+      # retrospective sweep, which verifies the deploy before merging.
+      #
+      # The merge runs on AUTOMERGE_PAT, not GITHUB_TOKEN: pushes made with
+      # GITHUB_TOKEN never trigger other workflows, so a self-merged PR would
+      # silently skip the push-to-main deploy and CI runs. The PAT lives in
+      # both the Actions and Dependabot secret stores (Dependabot-triggered
+      # runs resolve secrets from the Dependabot store). No GITHUB_TOKEN
+      # fallback on purpose: a missing PAT must fail loudly here rather than
+      # quietly restore the deploy-skipping merge path.
+      - name: Require AUTOMERGE_PAT
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
         run: |
-          set -euo pipefail
-          deadline=$((SECONDS + 900))
-
-          while (( SECONDS < deadline )); do
-            reviews="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100")"
-            comments="$(gh api "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100")"
-            checks="$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/check-runs?per_page=100")"
-
-            github_review="$(jq -r 'any(.[]; .state == "APPROVED" or .state == "COMMENTED")' <<< "${reviews}")"
-            coderabbit_review="$(jq -r 'any(.[]; (.user.login | ascii_downcase | contains("coderabbit")) and (.body | ascii_downcase | contains("no actionable comments")))' <<< "${comments}")"
-            fallback_review="$(jq -r 'any(.[]; .user.login == "dacoldest" and (.body | test("<!--[[:space:]]*sigil-review-fallback[[:space:]]+sha=[0-9a-f]{40}[[:space:]]+verdict=verified[[:space:]]*-->"; "i")))' <<< "${comments}")"
-            codex_review="$(jq -r '
-              [.[] | select(.user.login == "dacoldest" and (.body | ascii_downcase | gsub("^[[:space:]]+|[[:space:]]+$"; "") == "@codex review")) | .[].created_at] as $requests
-              | any(.[];
-                  (.user.login | ascii_downcase | contains("codex")) and
-                  (.body | startswith("Codex Review:")) and
-                  (.created_at as $response_time | any($requests[]; . < $response_time))
-                )
-            ' <<< "${comments}")"
-            deepsource_review="$(jq -r 'any(.check_runs[]?; (.name | ascii_downcase | contains("deepsource")) and .status == "completed" and .conclusion == "success")' <<< "${checks}")"
-
-            if [[ "${github_review}" == true || "${coderabbit_review}" == true || "${fallback_review}" == true || "${codex_review}" == true || "${deepsource_review}" == true ]]; then
-              echo "Found one qualifying completed review; no additional reviewer will run."
-              exit 0
-            fi
-
-            sleep 10
-          done
-
-          echo "Timed out waiting for one qualifying completed review; automatic merge remains disabled." >&2
-          exit 1
-
-      # Enable auto-merge only for patch/minor updates.
-      # Major version bumps and security-fix PRs that cross majors
-      # fall through to manual review. PR_URL is passed via env (safe
-      # pattern per github.blog/security workflow injection guidance)
-      # rather than interpolated directly into the run command.
-      - name: Enable auto-merge for patch/minor
-        if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::AUTOMERGE_PAT is not set in this repo's Dependabot secrets; refusing to merge with GITHUB_TOKEN (its pushes skip deploy/CI triggers)."
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_PAT }}
+      - name: Enable auto-merge (patch and minor updates)
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR_URL" || gh pr merge --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr merge --auto --squash "$PR_URL"
+          GH_TOKEN: ${{ secrets.AUTOMERGE_PAT }}
