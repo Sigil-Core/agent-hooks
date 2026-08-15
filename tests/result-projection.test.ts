@@ -81,6 +81,7 @@ function input(
     requestIdDigest: digest('request id'),
     requestDigest: digest('request'),
     resultDigest: digest('result'),
+    projectionDigest: projected.digest,
   };
   return {
     verifiedPolicy: responsePolicy,
@@ -238,6 +239,13 @@ describe('MCP CallToolResult projection v1', () => {
       }),
     ).toEqual({ ok: false, reason: 'projection_limit' });
   });
+
+  it('bounds structured-content canonicalization while it is generated', () => {
+    expect(projectCallToolResult({
+      content: [],
+      structuredContent: { payload: 'a'.repeat(MAX_RESULT_PROJECTION_BYTES) },
+    })).toEqual({ ok: false, reason: 'projection_limit' });
+  });
 });
 
 describe('checkResult format 1', () => {
@@ -323,6 +331,12 @@ describe('checkResult format 1', () => {
     );
   });
 
+  it('fails closed at the finding bound without materializing every match', () => {
+    const decision = checkResult(input(policy({ denyStrings: ['a'] }), projection('a'.repeat(10_000))));
+    expect(decision).toMatchObject({ disposition: 'BLOCK', reason: 'evaluator_failure' });
+    expect(decision.findings).toHaveLength(0);
+  });
+
   it.each([
     ['tenantId', 'other'],
     ['taskId', 'other'],
@@ -344,6 +358,7 @@ describe('checkResult format 1', () => {
     'requestIdDigest',
     'requestDigest',
     'resultDigest',
+    'projectionDigest',
   ] as const)('fails closed when %s differs from its trusted binding', (field) => {
     const candidate = input(policy(), projection('clean'));
     candidate.trustedBindings = { ...candidate.trustedBindings, [field]: digest(`other ${field}`) };
