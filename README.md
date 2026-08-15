@@ -12,6 +12,85 @@ npm install @sigilcore/agent-hooks
 
 You need a Sigil API key. Get one at [sigilcore.com/tools/keys](https://sigilcore.com/tools/keys).
 
+## MCP result inspection (Policy 2.2)
+
+Policy 2.2 adds a separate, fail-closed result API. `checkIntent` remains the
+pre-execution authorization call. After a covered MCP `tools/call` completes,
+use `projectCallToolResult` and `checkResult` before forwarding the result:
+
+For a covered approval, `checkIntent` returns `responsePolicy.compactJws`, its
+compiled-payload digest, its envelope digest, and the separate
+`intentAttestation`. The three response-policy fields are atomic: a partial or
+malformed triple fails through the configured fail mode. Verify the compact JWS
+with exact `@sigilcore/warrant-core` `0.3.0` and trusted issuer, key, tenant,
+task, policy-hash, revocation, ruleset, catalog, and clock context before
+passing the resulting verified payload to `checkResult`. The SDK never labels
+untrusted authorization JSON as verified policy.
+
+```typescript
+import {
+  CALL_TOOL_RESULT_CONTENT_TYPE,
+  projectCallToolResult,
+  verifyAndCheckResult,
+} from '@sigilcore/agent-hooks';
+import { createNodeCryptoAdapter } from '@sigilcore/warrant-core/crypto/node';
+
+const projected = projectCallToolResult(callToolResult);
+if (!projected.ok) {
+  // Disclosure is denied. Do not forward the upstream result.
+  throw new Error(`Result disclosure denied: ${projected.reason}`);
+}
+
+const decision = await verifyAndCheckResult({
+  adapter: createNodeCryptoAdapter(),
+  authorization: authorization.responsePolicy,
+  // Build this only from trusted local/operator state. Never copy issuer,
+  // key, tenant, task, policy, revocation, catalog, or time claims out of the
+  // compact JWS into this context.
+  trustedContext,
+  result: {
+    authorizationBinding,
+    executionId,
+    requestIdDigest,
+    requestDigest,
+    resultDigest,
+    contentType: CALL_TOOL_RESULT_CONTENT_TYPE,
+    idempotencyKey,
+    tool: `${trustedServerId}.${sdkToolName}`,
+    tenantId,
+    taskId,
+    policyHash,
+    projection: projected.projection,
+  },
+});
+
+if (decision.disposition !== 'ALLOW') {
+  // The upstream action may already have completed; deny result disclosure.
+  throw new Error(`Result disclosure denied: ${decision.reason}`);
+}
+```
+
+`projectCallToolResult` uses the frozen `sof-rp-projection-v1` framing and
+rejects binary, mixed, unknown, over-depth, and over-16-MiB results. It
+inspects text blocks, embedded resource text, resource-link strings, and
+canonical `structuredContent`; `isError: true` follows the same path.
+
+`checkResult` validates every execution, request, tenant, task, tool, policy,
+content, and projection binding, then runs the pinned
+`sof-response-rules-v1` rules and exact response literals locally. It performs
+no network request and has no logging, diagnostic callback, telemetry, or
+hosted receipt path. Response bytes stay inside the caller's process. A
+missing, malformed, unsupported, expired, mismatched, oversized, or
+evaluator-failed covered result must not forward, regardless of the general
+`checkIntent` fail mode.
+
+`verifyResponsePolicyAuthorization` is also exported when preparation and
+evaluation must be separate. It returns Warrant Core's verified payload only
+after the compact JWS, canonical payload bytes, signature, issuer, key,
+audience, scope, tenant, task, policy hash, revocation epoch, catalog digests,
+lifetime, compiled-payload digest, and envelope digest agree. Never construct
+a verified policy object from untrusted JSON.
+
 ## Quick Start
 
 ### Claude Code / Anthropic SDK

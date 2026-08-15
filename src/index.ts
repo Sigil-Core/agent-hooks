@@ -1,6 +1,31 @@
 // src/index.ts
 
 export { checkIntent } from './interceptor.js';
+export { checkResult } from './check-result.js';
+export {
+  verifyAndCheckResult,
+  verifyResponsePolicyAuthorization,
+} from './response-policy.js';
+export {
+  DETERMINISTIC_RULESET_V1,
+  DETERMINISTIC_RULESET_V1_DIGEST,
+  RESPONSE_CLASS_CATALOG_V1,
+  RESPONSE_CLASS_CATALOG_V1_DIGEST,
+} from './check-result.js';
+export type {
+  CompiledResponsePolicyVerificationContext,
+  CryptoAdapter,
+  VerifiedCompiledResponsePolicyFormat1,
+  VerifyAndCheckResultInput,
+} from './response-policy.js';
+export {
+  CALL_TOOL_RESULT_CONTENT_TYPE,
+  MAX_RESULT_NESTING_DEPTH,
+  MAX_RESULT_PROJECTION_BYTES,
+  RESULT_PROJECTION_CONTENT_TYPE,
+  RESULT_PROJECTION_VERSION,
+  projectCallToolResult,
+} from './result-projection.js';
 export { buildAuthorizeRequestBody, serializeAuthorizeRequestBody } from './request.js';
 export { buildRejectionContext } from './rejection.js';
 export {
@@ -67,6 +92,20 @@ export {
   SIGIL_UNREACHABLE,
 } from './types.js';
 export type {
+  CheckResultInput,
+  ResponseClass,
+  ResponseDecisionReason,
+  ResponseDecisionV1,
+  ResponseFinding,
+  VerifiedResponsePolicyV1,
+} from './check-result.js';
+export type {
+  ProjectCallToolResult,
+  ResultProjectionFailureReason,
+  ResultProjectionRecord,
+  ResultProjectionV1,
+} from './result-projection.js';
+export type {
   HttpMethod,
   SigilHttpMethod,
   SigilDecision,
@@ -77,6 +116,7 @@ export type {
   SigilModelUsage,
   SigilModelUsageReport,
   SigilRejectionContext,
+  SigilResponsePolicyAuthorization,
 } from './types.js';
 export type { AnthropicToolUseBlock } from './adapters/claude.js';
 export type {

@@ -146,9 +146,24 @@ export interface SigilHookResult {
   errorCode?: string;
   message?: string;
   policyHash?: string;
+  /** Compact intent attestation returned by Sign for an actual approval. */
+  intentAttestation?: string;
+  /**
+   * Atomic Policy 2.2 authorization material returned only for a covered
+   * approval. Verify `compactJws` with Warrant Core before calling
+   * `checkResult`; this SDK never treats the unverified wire payload as a
+   * `VerifiedResponsePolicyV1`.
+   */
+  responsePolicy?: SigilResponsePolicyAuthorization;
   // Resolved task id used for this authorization check.
   taskId?: string;
   failOpen?: boolean;      // true when APPROVED was returned via fail-open (not real policy evaluation)
+}
+
+export interface SigilResponsePolicyAuthorization {
+  compactJws: string;
+  compiledPolicyDigest: string;
+  envelopeDigest: string;
 }
 
 // Graceful Agent Degradation — typed JSON fed back to the agent context
