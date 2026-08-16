@@ -515,6 +515,81 @@ describe('Release 2 operator scanner boundary', () => {
     expect(decision.scannerEvidence).toEqual({ status: 'failed', reason: 'schema', required: true });
   });
 
+  it('validates scanner evidence against the immutable request byte snapshot', async () => {
+    const projected = projection('ordinary opaque-value output');
+    const expectedFinding = finding(projected, 'opaque-value');
+    let requestSeen: ScannerRequestV1 | undefined;
+    let resolveScan: ((value: Awaited<ReturnType<AuthenticatedScannerTransport['scan']>>) => void) | undefined;
+    const pending = checkResultV2(input(policy({
+      blockClasses: ['pii'],
+      scanner: {
+        required: true,
+        profile: 'operator-presidio-v1',
+        classes: ['pii'],
+        minConfidence: 0.85,
+      },
+    }), projected, {
+      transport: {
+        scan(request) {
+          requestSeen = request;
+          return new Promise((resolve) => { resolveScan = resolve; });
+        },
+      },
+    }));
+    await vi.waitFor(() => expect(resolveScan).toBeDefined());
+
+    projected.bytes.fill(0);
+    const request = requestSeen as ScannerRequestV1;
+    resolveScan?.({
+      authenticated: true,
+      body: new TextEncoder().encode(JSON.stringify(response(request, [expectedFinding]))),
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      disposition: 'BLOCK',
+      reason: 'scanner_block',
+      scannerEvidence: { status: 'verified', findingCount: 1 },
+    });
+  });
+
+  it('snapshots signed scanner enforcement values before awaiting transport', async () => {
+    const projected = projection('ordinary opaque-value output');
+    const signedPolicy = policy({
+      blockClasses: ['pii'],
+      scanner: {
+        required: true,
+        profile: 'operator-presidio-v1',
+        classes: ['pii'],
+        minConfidence: 0.85,
+      },
+    });
+    let requestSeen: ScannerRequestV1 | undefined;
+    let resolveScan: ((value: Awaited<ReturnType<AuthenticatedScannerTransport['scan']>>) => void) | undefined;
+    const pending = checkResultV2(input(signedPolicy, projected, {
+      transport: {
+        scan(request) {
+          requestSeen = request;
+          return new Promise((resolve) => { resolveScan = resolve; });
+        },
+      },
+    }));
+    await vi.waitFor(() => expect(resolveScan).toBeDefined());
+
+    if (!signedPolicy.policy.scanner) throw new Error('scanner policy missing');
+    signedPolicy.policy.scanner.minConfidence = 0.99;
+    const request = requestSeen as ScannerRequestV1;
+    resolveScan?.({
+      authenticated: true,
+      body: new TextEncoder().encode(JSON.stringify(response(request, [finding(projected, 'opaque-value')]))),
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      disposition: 'BLOCK',
+      reason: 'scanner_block',
+      findings: [{ qualified: true }],
+    });
+  });
+
   it('fails closed on hostile format-2 policy schema drift', async () => {
     const projected = projection('ordinary output');
     const hostile = {

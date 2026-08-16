@@ -453,19 +453,19 @@ function scannerFailure(
 }
 
 function validateMappedOffset(
-  input: CheckResultV2Input,
+  projection: CheckResultInput['projection'],
   start: number,
   end: number,
 ): boolean {
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= end) {
     return false;
   }
-  const containingRecord = input.projection.records.find(
+  const containingRecord = projection.records.find(
     (record) => start >= record.start && end <= record.end,
   );
   if (!containingRecord) return false;
   try {
-    new TextDecoder('utf-8', { fatal: true }).decode(input.projection.bytes.subarray(start, end));
+    new TextDecoder('utf-8', { fatal: true }).decode(projection.bytes.subarray(start, end));
     return true;
   } catch {
     return false;
@@ -474,7 +474,7 @@ function validateMappedOffset(
 
 // skipcq: JS-R1005 - Authentication, binding, bounds, and finding validation remain one ordered fail-closed scanner boundary.
 function validateScannerResponse(
-  input: CheckResultV2Input,
+  projection: CheckResultInput['projection'],
   request: ScannerRequestV1,
   raw: Uint8Array,
 ): ParsedScannerResponse {
@@ -524,13 +524,13 @@ function validateScannerResponse(
     if (typeof finding.confidence !== 'string' || !CONFIDENCE.test(finding.confidence)) {
       throw new ScannerValidationError('confidence');
     }
-    if (!validateMappedOffset(input, finding.start as number, finding.end as number)) {
+    if (!validateMappedOffset(projection, finding.start as number, finding.end as number)) {
       throw new ScannerValidationError('offset');
     }
     if (typeof finding.evidenceDigest !== 'string' || !HEX_64.test(finding.evidenceDigest)) {
       throw new ScannerValidationError('evidence_digest');
     }
-    const evidence = input.projection.bytes.subarray(finding.start as number, finding.end as number);
+    const evidence = projection.bytes.subarray(finding.start as number, finding.end as number);
     if (sha256(evidence) !== finding.evidenceDigest) {
       throw new ScannerValidationError('evidence_digest');
     }
@@ -617,6 +617,9 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
   const scannerPolicy = policy.policy.scanner;
   if (!scannerPolicy) return Object.freeze(decision);
   const required = scannerPolicy.required;
+  const minConfidence = scannerPolicy.minConfidence;
+  const maxFindings = policy.bounds.maxFindings;
+  const blockClasses = new Set(policy.policy.blockClasses ?? []);
   const deadlineMs = checkedInput.scanner?.deadlineMs ?? policy.bounds.scannerDeadlineMs;
   if (
     !checkedInput.scanner || !Number.isSafeInteger(deadlineMs) ||
@@ -628,6 +631,13 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
     return scannerFailure(decision, 'schema', required);
   }
   const content = new Uint8Array(checkedInput.projection.bytes);
+  const projectionSnapshot: CheckResultInput['projection'] = Object.freeze({
+    version: checkedInput.projection.version,
+    contentType: checkedInput.projection.contentType,
+    bytes: content,
+    digest: checkedInput.projection.digest,
+    records: Object.freeze(checkedInput.projection.records.map((record) => Object.freeze({ ...record }))),
+  });
   const request: ScannerRequestV1 = {
     protocolVersion: SCANNER_PROTOCOL_VERSION,
     executionId: checkedInput.executionId,
@@ -655,12 +665,12 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
     if (sha256(content) !== request.contentDigest) {
       throw new ScannerValidationError('schema');
     }
-    response = validateScannerResponse(checkedInput, request, responseBody);
+    response = validateScannerResponse(projectionSnapshot, request, responseBody);
   } catch (error) {
     const reason = error instanceof ScannerValidationError ? error.reason : 'schema';
     return scannerFailure(decision, reason, required);
   }
-  if (decision.findings.length + response.findings.length > policy.bounds.maxFindings) {
+  if (decision.findings.length + response.findings.length > maxFindings) {
     return scannerFailure(decision, 'findings_limit', required);
   }
 
@@ -671,7 +681,7 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
     source: 'scanner',
     rulesetVersion: response.rulesetVersion,
     ruleId: `scanner:${response.scannerId}:${index}`,
-    qualified: Number(finding.confidence) >= scannerPolicy.minConfidence,
+    qualified: Number(finding.confidence) >= minConfidence,
     observed: observeActive && observeClasses.has(finding.class),
   }));
   decision.findings = Object.freeze([...decision.findings, ...scannerFindings].sort((left, right) =>
@@ -689,7 +699,6 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
     findingCount: response.findings.length,
   });
 
-  const blockClasses = new Set(policy.policy.blockClasses ?? []);
   if (scannerFindings.some((finding) => finding.qualified && blockClasses.has(finding.class))) {
     decision.disposition = 'BLOCK';
     decision.reason = 'scanner_block';
