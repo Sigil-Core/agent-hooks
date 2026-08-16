@@ -99,20 +99,6 @@ const isPlainObject = (value: object): boolean => {
   return prototype === Object.prototype || prototype === null;
 };
 
-function ownDataValues(value: object): readonly unknown[] {
-  if (Object.getOwnPropertySymbols(value).length !== 0) {
-    throw new TypeError('Symbol-keyed projection value.');
-  }
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  return Object.keys(descriptors).map((key) => {
-    const descriptor = descriptors[key];
-    if (!descriptor || !('value' in descriptor) || descriptor.get || descriptor.set) {
-      throw new TypeError('Accessor projection value.');
-    }
-    return descriptor.value;
-  });
-}
-
 function hasOnlyKeys(
   value: Record<string, unknown>,
   allowed: readonly string[],
@@ -121,7 +107,22 @@ function hasOnlyKeys(
   return Object.keys(value).every((key) => allowedSet.has(key));
 }
 
-function jsonDepth(value: unknown, depth = 1): number {
+interface TraversalBudget {
+  remaining: number;
+}
+
+function consumeTraversalBudget(budget: TraversalBudget, bytes: number): void {
+  budget.remaining -= bytes;
+  if (budget.remaining < 0) {
+    throw new ProjectionLimitError('Projection traversal limit exceeded.');
+  }
+}
+
+function jsonDepth(
+  value: unknown,
+  budget: TraversalBudget,
+  depth = 1,
+): number {
   if (depth > MAX_RESULT_NESTING_DEPTH) return depth;
   if (Array.isArray(value)) {
     if (Object.getPrototypeOf(value) !== Array.prototype) {
@@ -129,19 +130,29 @@ function jsonDepth(value: unknown, depth = 1): number {
     }
     let maximum = depth;
     for (let index = 0; index < value.length; index += 1) {
+      consumeTraversalBudget(budget, 1);
       const descriptor = Object.getOwnPropertyDescriptor(value, index);
       if (!descriptor || !('value' in descriptor) || descriptor.get || descriptor.set) {
         throw new TypeError('Sparse or accessor projection array.');
       }
-      maximum = Math.max(maximum, jsonDepth(descriptor.value, depth + 1));
+      maximum = Math.max(maximum, jsonDepth(descriptor.value, budget, depth + 1));
     }
     return maximum;
   }
   if (isRecord(value)) {
     if (!isPlainObject(value)) throw new TypeError('Non-plain projection object.');
     let maximum = depth;
-    for (const item of ownDataValues(value)) {
-      maximum = Math.max(maximum, jsonDepth(item, depth + 1));
+    for (const key in value) {
+      if (!Object.hasOwn(value, key)) continue;
+      consumeTraversalBudget(budget, Buffer.byteLength(JSON.stringify(key), 'utf8') + 1);
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !('value' in descriptor) || descriptor.get || descriptor.set) {
+        throw new TypeError('Accessor projection value.');
+      }
+      maximum = Math.max(maximum, jsonDepth(descriptor.value, budget, depth + 1));
+    }
+    if (Object.getOwnPropertySymbols(value).length !== 0) {
+      throw new TypeError('Symbol-keyed projection value.');
     }
     return maximum;
   }
@@ -400,7 +411,7 @@ export function projectCallToolResult(result: unknown): ProjectCallToolResult {
     ) {
       return { ok: false, reason: 'evaluator_failure' };
     }
-    if (jsonDepth(result) > MAX_RESULT_NESTING_DEPTH) {
+    if (jsonDepth(result, { remaining: MAX_RESULT_PROJECTION_BYTES }) > MAX_RESULT_NESTING_DEPTH) {
       return { ok: false, reason: 'nesting_limit' };
     }
     const records: PendingRecord[] = [];
@@ -413,9 +424,6 @@ export function projectCallToolResult(result: unknown): ProjectCallToolResult {
       }
     }
     if (Object.hasOwn(result, 'structuredContent')) {
-      if (jsonDepth(result.structuredContent) > MAX_RESULT_NESTING_DEPTH) {
-        return { ok: false, reason: 'nesting_limit' };
-      }
       appendCanonical(records, '/structuredContent', result.structuredContent);
     }
     if (Object.hasOwn(result, '_meta')) {

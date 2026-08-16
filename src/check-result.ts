@@ -404,10 +404,10 @@ function validateProjection(projection: ResultProjectionV1): boolean {
   ) {
     return false;
   }
+  if (projection.bytes.byteLength > MAX_RESULT_PROJECTION_BYTES) return false;
   const digest = createHash('sha256').update(projection.bytes).digest('hex');
   if (!sameString(digest, projection.digest)) return false;
   const bytes = Buffer.from(projection.bytes);
-  if (bytes.length > MAX_RESULT_PROJECTION_BYTES) return false;
   const magic = Buffer.from('SOF-RP-PROJECTION-1\n', 'ascii');
   if (
     bytes.length < magic.length + 4 ||

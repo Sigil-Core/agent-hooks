@@ -265,6 +265,22 @@ describe('MCP CallToolResult projection v1', () => {
       structuredContent: { value: '"'.repeat((MAX_RESULT_PROJECTION_BYTES / 2) + 1) },
     })).toEqual({ ok: false, reason: 'projection_limit' });
   });
+
+  it('stops wide-object traversal at the projection byte budget without bulk descriptor copying', () => {
+    const descriptorCopy = vi.spyOn(Object, 'getOwnPropertyDescriptors');
+    const structuredContent = Object.fromEntries(
+      Array.from(
+        { length: 20_000 },
+        (_, index) => [`${index.toString().padStart(5, '0')}-${'k'.repeat(1_000)}`, null],
+      ),
+    );
+
+    expect(projectCallToolResult({ content: [], structuredContent })).toEqual({
+      ok: false,
+      reason: 'projection_limit',
+    });
+    expect(descriptorCopy).not.toHaveBeenCalled();
+  });
 });
 
 describe('checkResult format 1', () => {
@@ -445,6 +461,23 @@ describe('checkResult format 1', () => {
     bytes[bytes.length - 1] ^= 1;
     tampered.projection = { ...tampered.projection, bytes };
     expect(checkResult(tampered).reason).toBe('evaluator_failure');
+  });
+
+  it('rejects oversized deserialized projection bytes before validation copies them', () => {
+    const responsePolicy = policy();
+    const projected = projection('clean');
+    const oversizedDigest = '0'.repeat(64);
+    const candidate = input(responsePolicy, {
+      ...projected,
+      bytes: new Uint8Array(MAX_RESULT_PROJECTION_BYTES + 1),
+      digest: oversizedDigest,
+    });
+    candidate.trustedBindings = {
+      ...candidate.trustedBindings,
+      projectionDigest: oversizedDigest,
+    };
+
+    expect(checkResult(candidate).reason).toBe('evaluator_failure');
   });
 
   it('fails closed on a fabricated record map or policy member', () => {
