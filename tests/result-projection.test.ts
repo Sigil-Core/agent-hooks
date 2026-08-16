@@ -409,6 +409,34 @@ describe('checkResult format 1', () => {
     expect(finding?.evidenceDigest).toBe(createHash('sha256').update(evidence).digest('hex'));
   });
 
+  it('uses one bounded multi-literal pass for the maximum deny-string set', () => {
+    const literals = Array.from(
+      { length: 64 },
+      (_, index) => `literal-${index.toString().padStart(3, '0')}`,
+    );
+    const matchAll = vi.spyOn(String.prototype, 'matchAll');
+    expect(checkResult(input(policy({ denyStrings: literals }), projection('no denied value'))))
+      .toMatchObject({ disposition: 'ALLOW', reason: 'none' });
+    const combinedCalls = matchAll.mock.calls.filter(([pattern]) => {
+      const source = pattern instanceof RegExp ? pattern.source : String(pattern);
+      return source.includes('literal-000') && source.includes('literal-063');
+    });
+    expect(combinedCalls).toHaveLength(1);
+  });
+
+  it('rejects deny-string sets outside the fixed count and UTF-8 budgets', () => {
+    const tooMany = Array.from(
+      { length: 65 },
+      (_, index) => `literal-${index.toString().padStart(3, '0')}`,
+    );
+    expect(checkResult(input(policy({ denyStrings: tooMany }), projection('safe'))).reason)
+      .toBe('envelope_invalid');
+    expect(checkResult(input(
+      policy({ denyStrings: ['a'.repeat(4_097), 'b'.repeat(4_097)] }),
+      projection('safe'),
+    )).reason).toBe('envelope_invalid');
+  });
+
   it.each([
     ['tenantId', 'other'],
     ['taskId', 'other'],

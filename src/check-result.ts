@@ -40,6 +40,8 @@ const EXPECTED_BOUNDS = Object.freeze({
   clockSkewSeconds: 30,
   maxObserveWindowSeconds: 2592000,
 });
+const MAX_DENY_STRING_COUNT = 64;
+const MAX_DENY_STRING_UTF8_BYTES = 8192;
 
 export type ResponseClass =
   | 'malicious_url'
@@ -324,7 +326,10 @@ function validPolicy(policy: unknown): policy is VerifiedResponsePolicyV1 {
     literals !== undefined &&
     (!Array.isArray(literals) ||
       literals.length === 0 ||
+      literals.length > MAX_DENY_STRING_COUNT ||
       literals.some((item) => typeof item !== 'string' || item === '') ||
+      literals.reduce((total, item) => total + Buffer.byteLength(item, 'utf8'), 0) >
+        MAX_DENY_STRING_UTF8_BYTES ||
       new Set(literals).size !== literals.length)
   ) {
     return false;
@@ -411,6 +416,11 @@ interface JoinedTextRecord {
   charEnd: number;
 }
 
+type RuleIdResolver = string | ((text: string) => string);
+
+const resolveRuleId = (resolver: RuleIdResolver, text: string): string =>
+  typeof resolver === 'string' ? resolver : resolver(text);
+
 const MODEL_VISIBLE_TEXT_PATH = /^(?:\/content\/\d+\/(?:text|resource\/text|uri|name|title|description)|\/structuredContent)$/;
 
 function locateJoinedRecord(
@@ -433,7 +443,7 @@ function findJoinedTextByteMatches(
   projection: ResultProjectionV1,
   pattern: RegExp,
   responseClass: ResponseClass,
-  ruleId: string,
+  ruleId: RuleIdResolver,
   limit: number,
 ): ResponseFinding[] {
   const findings: ResponseFinding[] = [];
@@ -474,7 +484,7 @@ function findJoinedTextByteMatches(
           end,
           evidenceDigest: createHash('sha256').update(fragment, 'utf8').digest('hex'),
           rulesetVersion: 'sof-response-rules-v1',
-          ruleId,
+          ruleId: resolveRuleId(ruleId, text),
         });
         if (findings.length >= limit) return true;
       }
@@ -497,7 +507,7 @@ function findByteMatches(
   projection: ResultProjectionV1,
   pattern: RegExp,
   responseClass: ResponseClass,
-  ruleId: string,
+  ruleId: RuleIdResolver,
   limit: number,
 ): ResponseFinding[] {
   const findings: ResponseFinding[] = [];
@@ -520,7 +530,7 @@ function findByteMatches(
         end,
         evidenceDigest: createHash('sha256').update(text, 'utf8').digest('hex'),
         rulesetVersion: 'sof-response-rules-v1',
-        ruleId,
+        ruleId: resolveRuleId(ruleId, text),
       });
       if (findings.length >= limit) return findings;
       previousCharIndex = charIndex;
@@ -543,8 +553,8 @@ const JSON_STRING_TOKEN = /"(?:\\["\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\])*"/gu;
 
 function findDecodedStructuredLiteralMatches(
   projection: ResultProjectionV1,
-  literal: string,
-  ruleId: string,
+  pattern: RegExp,
+  ruleId: RuleIdResolver,
   limit: number,
 ): ResponseFinding[] {
   const findings: ResponseFinding[] = [];
@@ -557,10 +567,11 @@ function findDecodedStructuredLiteralMatches(
       if (tokenIndex === undefined) continue;
       const decoded = JSON.parse(token) as unknown;
       if (typeof decoded !== 'string') continue;
-      let fromIndex = 0;
-      while (fromIndex <= decoded.length - literal.length) {
-        const decodedIndex = decoded.indexOf(literal, fromIndex);
-        if (decodedIndex < 0) break;
+      pattern.lastIndex = 0;
+      for (const decodedMatch of decoded.matchAll(pattern)) {
+        const literal = decodedMatch[0];
+        const decodedIndex = decodedMatch.index;
+        if (literal === '' || decodedIndex === undefined) continue;
         const encodedPrefix = JSON.stringify(decoded.slice(0, decodedIndex)).slice(1, -1);
         const encodedThrough = JSON.stringify(
           decoded.slice(0, decodedIndex + literal.length),
@@ -583,11 +594,10 @@ function findDecodedStructuredLiteralMatches(
             end,
             evidenceDigest: createHash('sha256').update(evidence, 'utf8').digest('hex'),
             rulesetVersion: 'sof-response-rules-v1',
-            ruleId,
+            ruleId: resolveRuleId(ruleId, literal),
           });
           if (findings.length >= limit) return findings;
         }
-        fromIndex = decodedIndex + literal.length;
       }
     }
   }
@@ -753,14 +763,22 @@ function evaluateCheckResult(
         return Object.freeze(decision);
       }
     }
-    for (const literal of policy.policy.denyStrings ?? []) {
-      const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const ruleId = `response.deny_string:${createHash('sha256').update(literal).digest('hex')}`;
+    const denyStrings = policy.policy.denyStrings ?? [];
+    if (denyStrings.length > 0) {
+      const orderedLiterals = [...denyStrings].sort(
+        (left, right) => right.length - left.length || left.localeCompare(right),
+      );
+      const pattern = new RegExp(
+        orderedLiterals.map((literal) => literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
+        'gu',
+      );
+      const ruleId = (literal: string): string =>
+        `response.deny_string:${createHash('sha256').update(literal).digest('hex')}`;
       const remaining = EXPECTED_BOUNDS.maxFindings - findings.length + 1;
       findings.push(
         ...findByteMatches(
           checkedInput.projection,
-          new RegExp(escaped, 'gu'),
+          pattern,
           'prompt_injection',
           ruleId,
           remaining,
@@ -773,7 +791,7 @@ function evaluateCheckResult(
       findings.push(
         ...findDecodedStructuredLiteralMatches(
           checkedInput.projection,
-          literal,
+          pattern,
           ruleId,
           EXPECTED_BOUNDS.maxFindings - findings.length + 1,
         ),
