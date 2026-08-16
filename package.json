@@ -1,6 +1,6 @@
 {
   "name": "@sigilcore/agent-hooks",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "PreToolUse interceptor for autonomous AI agents - policy enforcement via Sigil Sign",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -36,7 +36,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@sigilcore/warrant-core": "0.3.0"
+    "@sigilcore/warrant-core": "0.4.0"
   },
   "devDependencies": {
     "tsup": "^8.0.0",

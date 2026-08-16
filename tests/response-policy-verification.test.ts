@@ -1,7 +1,9 @@
 import {
   canonicalizePgCommitV1,
   compiledResponsePolicyFormat1Bytes,
+  compiledResponsePolicyFormat2Bytes,
   type CompiledResponsePolicyFormat1,
+  type CompiledResponsePolicyFormat2,
   type CompiledResponsePolicyVerificationContext,
   type CryptoAdapter,
 } from '@sigilcore/warrant-core';
@@ -15,6 +17,7 @@ import {
   projectCallToolResult,
   verifyAndCheckResult,
   verifyResponsePolicyAuthorization,
+  verifyResponsePolicyAuthorizationV2,
   type CheckResultInput,
   type SigilResponsePolicyAuthorization,
 } from '../src/index.js';
@@ -78,6 +81,26 @@ const payload = (): CompiledResponsePolicyFormat1 => ({
   },
 });
 
+const payloadV2 = (): CompiledResponsePolicyFormat2 => ({
+  ...payload(),
+  formatVersion: 2,
+  policyVersion: '2.3.0',
+  policy: {
+    ...payload().policy,
+    redactClasses: ['pii'],
+    scanner: {
+      required: true,
+      profile: 'operator-presidio-v1',
+      classes: ['pii', 'prompt_injection'],
+      minConfidence: 0.85,
+    },
+    observe: {
+      classes: ['prompt_injection'],
+      until: '2027-01-16T08:00:00Z',
+    },
+  },
+});
+
 interface SignedFixture {
   adapter: CryptoAdapter;
   authorization: SigilResponsePolicyAuthorization;
@@ -96,6 +119,46 @@ async function signedFixture(): Promise<SignedFixture> {
   });
   const headerSegment = Buffer.from(header, 'utf8').toString('base64url');
   const payloadBytes = compiledResponsePolicyFormat1Bytes(compiled);
+  const payloadSegment = Buffer.from(payloadBytes).toString('base64url');
+  const signature = await sign(
+    PRIVATE_KEY,
+    encoder.encode(`${headerSegment}.${payloadSegment}`),
+  );
+  const compactJws = `${headerSegment}.${payloadSegment}.${Buffer.from(signature).toString('base64url')}`;
+  return {
+    adapter,
+    authorization: {
+      compactJws,
+      compiledPolicyDigest: await digestHex(adapter, payloadBytes),
+      envelopeDigest: await digestHex(adapter, encoder.encode(compactJws)),
+    },
+    context: {
+      publicKey: PUBLIC_KEY,
+      issuer: compiled.issuer,
+      keyId: compiled.keyId,
+      tenantId: compiled.tenantId,
+      taskId: compiled.taskId,
+      policyHash: compiled.policyHash,
+      revocationEpoch: compiled.revocationEpoch,
+      deterministicRulesetDigest: DETERMINISTIC_RULESET_V1_DIGEST,
+      classCatalogDigest: RESPONSE_CLASS_CATALOG_V1_DIGEST,
+      now: compiled.issuedAt,
+    },
+  };
+}
+
+async function signedFixtureV2(): Promise<SignedFixture> {
+  const adapter = createNodeCryptoAdapter();
+  const sign = adapter.signEd25519;
+  if (!sign) throw new Error('Node Warrant Core adapter must support Ed25519 signing.');
+  const compiled = payloadV2();
+  const header = canonicalizePgCommitV1({
+    alg: 'EdDSA',
+    kid: compiled.keyId,
+    typ: 'sof-compiled-response-policy+jws',
+  });
+  const headerSegment = Buffer.from(header, 'utf8').toString('base64url');
+  const payloadBytes = compiledResponsePolicyFormat2Bytes(compiled);
   const payloadSegment = Buffer.from(payloadBytes).toString('base64url');
   const signature = await sign(
     PRIVATE_KEY,
@@ -289,5 +352,23 @@ describe('Policy 2.2 signed-envelope verification', () => {
     logSpy.mockRestore();
     warnSpy.mockRestore();
     errorSpy.mockRestore();
+  });
+});
+
+describe('Policy 2.3 signed-envelope verification', () => {
+  it('accepts format 2 only through the explicit Release 2 verifier', async () => {
+    const fixture = await signedFixtureV2();
+    const verified = await verifyResponsePolicyAuthorizationV2(
+      fixture.adapter,
+      fixture.authorization,
+      fixture.context,
+    );
+    expect(verified).toMatchObject(payloadV2());
+    expect(verified.compiledPolicyDigest).toBe(fixture.authorization.compiledPolicyDigest);
+    await expect(verifyResponsePolicyAuthorization(
+      fixture.adapter,
+      fixture.authorization,
+      fixture.context,
+    )).rejects.toThrow();
   });
 });

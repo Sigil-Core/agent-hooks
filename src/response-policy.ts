@@ -2,6 +2,7 @@ import type {
   CompiledResponsePolicyVerificationContext,
   CryptoAdapter,
   VerifiedCompiledResponsePolicyFormat1,
+  VerifiedCompiledResponsePolicyFormat2,
 } from '@sigilcore/warrant-core';
 
 import {
@@ -17,6 +18,11 @@ const encoder = new TextEncoder();
 const loadWarrantCoreVerifier = async () => {
   const warrantCore = await import('@sigilcore/warrant-core');
   return warrantCore.verifyCompiledResponsePolicyFormat1;
+};
+
+const loadWarrantCoreFormat2Verifier = async () => {
+  const warrantCore = await import('@sigilcore/warrant-core');
+  return warrantCore.verifyCompiledResponsePolicyFormat2;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -91,7 +97,7 @@ const validateAuthorization = (
 };
 
 /**
- * Verifies Sign's compact Policy 2.2 envelope with exact Warrant Core 0.3.0.
+ * Verifies Sign's compact Policy 2.2 envelope with exact Warrant Core 0.4.0.
  * Every trust binding comes from caller-supplied context; no envelope claim is
  * promoted into verification context. The response body remains local.
  */
@@ -103,6 +109,29 @@ export async function verifyResponsePolicyAuthorization(
   const validated = validateAuthorization(authorization);
   const verifyCompiledResponsePolicyFormat1 = await loadWarrantCoreVerifier();
   const verified = await verifyCompiledResponsePolicyFormat1(
+    adapter,
+    validated.compactJws,
+    trustedContext,
+  );
+  if (verified.compiledPolicyDigest !== validated.compiledPolicyDigest) {
+    throw new TypeError('Compiled response-policy digest mismatch.');
+  }
+  const envelopeDigest = await digestHex(adapter, encoder.encode(validated.compactJws));
+  if (envelopeDigest !== validated.envelopeDigest) {
+    throw new TypeError('Compiled response-policy envelope digest mismatch.');
+  }
+  return verified;
+}
+
+/** Verifies Sign's format-2 Policy 2.3 envelope without accepting format 1. */
+export async function verifyResponsePolicyAuthorizationV2(
+  adapter: CryptoAdapter,
+  authorization: SigilResponsePolicyAuthorization,
+  trustedContext: CompiledResponsePolicyVerificationContext,
+): Promise<VerifiedCompiledResponsePolicyFormat2> {
+  const validated = validateAuthorization(authorization);
+  const verifyCompiledResponsePolicyFormat2 = await loadWarrantCoreFormat2Verifier();
+  const verified = await verifyCompiledResponsePolicyFormat2(
     adapter,
     validated.compactJws,
     trustedContext,
@@ -149,4 +178,5 @@ export type {
   CompiledResponsePolicyVerificationContext,
   CryptoAdapter,
   VerifiedCompiledResponsePolicyFormat1,
+  VerifiedCompiledResponsePolicyFormat2,
 };
