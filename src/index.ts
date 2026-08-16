@@ -5,7 +5,12 @@ export { checkResult } from './check-result.js';
 export {
   verifyAndCheckResult,
   verifyResponsePolicyAuthorization,
+  verifyResponsePolicyAuthorizationV2,
 } from './response-policy.js';
+export {
+  SCANNER_PROTOCOL_VERSION,
+  checkResultV2,
+} from './scanner.js';
 export {
   DETERMINISTIC_RULESET_V1,
   DETERMINISTIC_RULESET_V1_DIGEST,
@@ -16,8 +21,22 @@ export type {
   CompiledResponsePolicyVerificationContext,
   CryptoAdapter,
   VerifiedCompiledResponsePolicyFormat1,
+  VerifiedCompiledResponsePolicyFormat2,
   VerifyAndCheckResultInput,
 } from './response-policy.js';
+export type {
+  AuthenticatedScannerTransport,
+  CheckResultV2Input,
+  ResponseDecisionReasonV2,
+  ResponseDecisionV2,
+  ResponseFindingV2,
+  ResponseRedactionSpanV1,
+  ScannerClientConfig,
+  ScannerEvidenceV1,
+  ScannerFailureReason,
+  ScannerRequestV1,
+  ScannerTransportResult,
+} from './scanner.js';
 export {
   CALL_TOOL_RESULT_CONTENT_TYPE,
   MAX_RESULT_NESTING_DEPTH,

@@ -99,6 +99,50 @@ audience, scope, tenant, task, policy hash, revocation epoch, catalog digests,
 lifetime, compiled-payload digest, and envelope digest agree. Never construct
 a verified policy object from untrusted JSON.
 
+## Operator scanner, redaction, and observe (Policy 2.3)
+
+Policy 2.3 uses the separate async `checkResultV2` API and the explicit
+`verifyResponsePolicyAuthorizationV2` verifier. Format 1 remains on the Policy
+2.2 API; neither verifier reinterprets the other format.
+
+`checkResultV2` accepts an injected `AuthenticatedScannerTransport`. The SDK
+ships no scanner, endpoint, credentials, certificate handling, model, Python
+runtime, or network client. The operator adapter receives one private copy of
+the bounded `sof-rp-projection-v1` bytes and must return authenticated raw JSON
+bytes. The SDK enforces the 2,000 ms deadline and 1 MiB response limit, parses
+duplicate-aware strict JSON, verifies every execution, policy, profile,
+content, class, offset, confidence, and evidence-digest binding, and rejects
+hostile extra fields.
+
+```typescript
+const verifiedPolicy = await verifyResponsePolicyAuthorizationV2(
+  cryptoAdapter,
+  authorization.responsePolicy,
+  trustedContext,
+);
+
+const decision = await checkResultV2({
+  ...trustedLocalResultBindings,
+  verifiedPolicy,
+  projection: projected.projection,
+  scanner: {
+    deadlineMs: 1_500, // May lower, never raise, the signed 2,000 ms ceiling.
+    transport: operatorAuthenticatedTransport,
+  },
+});
+```
+
+Scanner output is evidence, never the final decision. `BLOCK` takes precedence
+over `REDACT`, which takes precedence over `ALLOW`. Verified redaction spans
+are merged deterministically and bound to the exact input projection by
+`redactionPlanDigest`; the caller applies only those mapped UTF-8 ranges to the
+original result shape. Observe findings never change disposition. Content that
+already reaches a deterministic block or redaction is not sent to the scanner.
+A required-scanner failure blocks; an optional-scanner failure records bounded
+metadata and continues deterministic evaluation. No response bytes or scanner
+error text enter logs, metrics, traces, hosted Sign, or hosted receipts through
+this API.
+
 ## Quick Start
 
 ### Claude Code / Anthropic SDK
