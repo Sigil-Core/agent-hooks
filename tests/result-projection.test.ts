@@ -301,6 +301,12 @@ describe('MCP CallToolResult projection v1', () => {
     if (projected.ok) expect(projected.projection.records).toHaveLength(content.length);
     expect(concat).not.toHaveBeenCalled();
   });
+
+  it('zero-initializes the exact-size projection frame', () => {
+    const unsafeAllocation = vi.spyOn(Buffer, 'allocUnsafe');
+    expect(projectCallToolResult({ content: [{ type: 'text', text: 'safe' }] }).ok).toBe(true);
+    expect(unsafeAllocation).not.toHaveBeenCalled();
+  });
 });
 
 describe('checkResult format 1', () => {
@@ -384,6 +390,23 @@ describe('checkResult format 1', () => {
     expect(checkResult(input(responsePolicy, projection(decomposed))).reason).toBe(
       'none',
     );
+  });
+
+  it('blocks decoded deny strings that require escaping in canonical structured content', () => {
+    const projected = projectCallToolResult({
+      content: [],
+      structuredContent: { nested: 'prefix api"key suffix' },
+    });
+    expect(projected.ok).toBe(true);
+    if (!projected.ok) return;
+
+    const decision = checkResult(input(policy({ denyStrings: ['api"key'] }), projected.projection));
+    expect(decision).toMatchObject({ disposition: 'BLOCK', reason: 'response_literal' });
+    expect(decision.findings).toHaveLength(1);
+    const finding = decision.findings[0];
+    const evidence = Buffer.from(projected.projection.bytes).subarray(finding?.start, finding?.end);
+    expect(evidence.toString('utf8')).toBe('api\\"key');
+    expect(finding?.evidenceDigest).toBe(createHash('sha256').update(evidence).digest('hex'));
   });
 
   it.each([

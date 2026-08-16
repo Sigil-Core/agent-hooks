@@ -359,7 +359,7 @@ function collectContentRecord(
 function frameRecords(pending: PendingRecord[]): ResultProjectionV1 | null {
   const totalBytes = usedRecordBytes(pending);
   if (totalBytes > MAX_RESULT_PROJECTION_BYTES || pending.length > 0xffffffff) return null;
-  const bytes = Buffer.allocUnsafe(totalBytes);
+  const bytes = Buffer.alloc(totalBytes);
   PROJECTION_MAGIC.copy(bytes, 0);
   bytes.writeUInt32BE(pending.length, PROJECTION_MAGIC.length);
   const records: ResultProjectionRecord[] = [];

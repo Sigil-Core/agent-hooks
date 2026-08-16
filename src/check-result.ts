@@ -537,6 +537,63 @@ function findByteMatches(
   return findings;
 }
 
+// The canonical writer always escapes JSON control characters, so excluding
+// quote and backslash is sufficient here without a raw control-range regex.
+const JSON_STRING_TOKEN = /"(?:\\["\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\])*"/gu;
+
+function findDecodedStructuredLiteralMatches(
+  projection: ResultProjectionV1,
+  literal: string,
+  ruleId: string,
+  limit: number,
+): ResponseFinding[] {
+  const findings: ResponseFinding[] = [];
+  for (const record of projection.records) {
+    if (record.path !== '/structuredContent') continue;
+    JSON_STRING_TOKEN.lastIndex = 0;
+    for (const tokenMatch of record.value.matchAll(JSON_STRING_TOKEN)) {
+      const token = tokenMatch[0];
+      const tokenIndex = tokenMatch.index;
+      if (tokenIndex === undefined) continue;
+      const decoded = JSON.parse(token) as unknown;
+      if (typeof decoded !== 'string') continue;
+      let fromIndex = 0;
+      while (fromIndex <= decoded.length - literal.length) {
+        const decodedIndex = decoded.indexOf(literal, fromIndex);
+        if (decodedIndex < 0) break;
+        const encodedPrefix = JSON.stringify(decoded.slice(0, decodedIndex)).slice(1, -1);
+        const encodedThrough = JSON.stringify(
+          decoded.slice(0, decodedIndex + literal.length),
+        ).slice(1, -1);
+        const tokenContents = token.slice(1, -1);
+        const exactMapping =
+          tokenContents.startsWith(encodedPrefix) &&
+          tokenContents.startsWith(encodedThrough) &&
+          encodedThrough.length >= encodedPrefix.length;
+        const encodedStart = exactMapping ? encodedPrefix.length : 0;
+        const encodedEnd = exactMapping ? encodedThrough.length : tokenContents.length;
+        const evidence = tokenContents.slice(encodedStart, encodedEnd);
+        if (evidence !== literal) {
+          const charStart = tokenIndex + 1 + encodedStart;
+          const start = record.start + Buffer.byteLength(record.value.slice(0, charStart), 'utf8');
+          const end = start + Buffer.byteLength(evidence, 'utf8');
+          findings.push({
+            class: 'prompt_injection',
+            start,
+            end,
+            evidenceDigest: createHash('sha256').update(evidence, 'utf8').digest('hex'),
+            rulesetVersion: 'sof-response-rules-v1',
+            ruleId,
+          });
+          if (findings.length >= limit) return findings;
+        }
+        fromIndex = decodedIndex + literal.length;
+      }
+    }
+  }
+  return findings;
+}
+
 function validateProjection(projection: ResultProjectionV1): boolean {
   if (
     !isRecord(projection) ||
@@ -698,14 +755,27 @@ function evaluateCheckResult(
     }
     for (const literal of policy.policy.denyStrings ?? []) {
       const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const ruleId = `response.deny_string:${createHash('sha256').update(literal).digest('hex')}`;
       const remaining = EXPECTED_BOUNDS.maxFindings - findings.length + 1;
       findings.push(
         ...findByteMatches(
           checkedInput.projection,
           new RegExp(escaped, 'gu'),
           'prompt_injection',
-          `response.deny_string:${createHash('sha256').update(literal).digest('hex')}`,
+          ruleId,
           remaining,
+        ),
+      );
+      if (findings.length > EXPECTED_BOUNDS.maxFindings) {
+        decision.reason = 'evaluator_failure';
+        return Object.freeze(decision);
+      }
+      findings.push(
+        ...findDecodedStructuredLiteralMatches(
+          checkedInput.projection,
+          literal,
+          ruleId,
+          EXPECTED_BOUNDS.maxFindings - findings.length + 1,
         ),
       );
       if (findings.length > EXPECTED_BOUNDS.maxFindings) {
