@@ -407,10 +407,11 @@ function readCheckResultInput(input: unknown): CheckResultInput {
 
 interface JoinedTextRecord {
   record: ResultProjectionV1['records'][number];
-  contentIndex: number;
   charStart: number;
   charEnd: number;
 }
+
+const MODEL_VISIBLE_TEXT_PATH = /^(?:\/content\/\d+\/(?:text|resource\/text|uri|name|title|description)|\/structuredContent)$/;
 
 function locateJoinedRecord(
   records: readonly JoinedTextRecord[],
@@ -436,8 +437,8 @@ function findJoinedTextByteMatches(
   limit: number,
 ): ResponseFinding[] {
   const findings: ResponseFinding[] = [];
-  let group: JoinedTextRecord[] = [];
-  let joinedParts: string[] = [];
+  const group: JoinedTextRecord[] = [];
+  const joinedParts: string[] = [];
   let joinedLength = 0;
 
   const scanGroup = (): boolean => {
@@ -454,42 +455,39 @@ function findJoinedTextByteMatches(
       const startRecord = group[startIndex];
       const endRecord = group[endIndex];
       if (startRecord === undefined || endRecord === undefined) continue;
-      const start = startRecord.record.start + Buffer.byteLength(
-        startRecord.record.value.slice(0, charIndex - startRecord.charStart),
-        'utf8',
-      );
-      const end = endRecord.record.start + Buffer.byteLength(
-        endRecord.record.value.slice(0, charIndex + text.length - endRecord.charStart),
-        'utf8',
-      );
-      findings.push({
-        class: responseClass,
-        start,
-        end,
-        evidenceDigest: createHash('sha256').update(text, 'utf8').digest('hex'),
-        rulesetVersion: 'sof-response-rules-v1',
-        ruleId,
-      });
-      if (findings.length >= limit) return true;
+      const matchEnd = charIndex + text.length;
+      for (let recordIndex = startIndex; recordIndex <= endIndex; recordIndex += 1) {
+        const joinedRecord = group[recordIndex];
+        if (joinedRecord === undefined) continue;
+        const fragmentStart = Math.max(charIndex, joinedRecord.charStart) - joinedRecord.charStart;
+        const fragmentEnd = Math.min(matchEnd, joinedRecord.charEnd) - joinedRecord.charStart;
+        if (fragmentStart >= fragmentEnd) continue;
+        const fragment = joinedRecord.record.value.slice(fragmentStart, fragmentEnd);
+        const start = joinedRecord.record.start + Buffer.byteLength(
+          joinedRecord.record.value.slice(0, fragmentStart),
+          'utf8',
+        );
+        const end = start + Buffer.byteLength(fragment, 'utf8');
+        findings.push({
+          class: responseClass,
+          start,
+          end,
+          evidenceDigest: createHash('sha256').update(fragment, 'utf8').digest('hex'),
+          rulesetVersion: 'sof-response-rules-v1',
+          ruleId,
+        });
+        if (findings.length >= limit) return true;
+      }
     }
     return false;
   };
 
   for (const record of projection.records) {
-    const pathMatch = /^\/content\/(\d+)\/text$/.exec(record.path);
-    if (pathMatch === null) continue;
-    const contentIndex = Number(pathMatch[1]);
-    const previous = group[group.length - 1];
-    if (previous !== undefined && contentIndex !== previous.contentIndex + 1) {
-      if (scanGroup()) return findings;
-      group = [];
-      joinedParts = [];
-      joinedLength = 0;
-    }
+    if (!MODEL_VISIBLE_TEXT_PATH.test(record.path)) continue;
     const charStart = joinedLength;
     joinedParts.push(record.value);
     joinedLength += record.value.length;
-    group.push({ record, contentIndex, charStart, charEnd: joinedLength });
+    group.push({ record, charStart, charEnd: joinedLength });
   }
   scanGroup();
   return findings;
@@ -609,10 +607,18 @@ function validateProjection(projection: ResultProjectionV1): boolean {
  * caller process. It performs no fetches and exposes no response bytes through
  * callbacks, diagnostics, logs, telemetry, or hosted receipts.
  */
-export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
+const NO_VERIFIED_POLICY_OVERRIDE = Symbol('no-verified-policy-override');
+
+function evaluateCheckResult(
+  input: unknown,
+  verifiedPolicyOverride: unknown | typeof NO_VERIFIED_POLICY_OVERRIDE,
+): ResponseDecisionV1 {
   let decision = baseDecision({});
   try {
     const checkedInput = readCheckResultInput(input);
+    if (verifiedPolicyOverride !== NO_VERIFIED_POLICY_OVERRIDE) {
+      checkedInput.verifiedPolicy = verifiedPolicyOverride as VerifiedResponsePolicyV1;
+    }
     decision = baseDecision(checkedInput);
     const policy = checkedInput.verifiedPolicy;
     const now = checkedInput.nowUnixSeconds ?? Math.floor(Date.now() / 1000);
@@ -733,4 +739,15 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
     decision.findings = Object.freeze([]);
     return Object.freeze(decision);
   }
+}
+
+export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
+  return evaluateCheckResult(input, NO_VERIFIED_POLICY_OVERRIDE);
+}
+
+export function checkResultWithVerifiedPolicy(
+  input: unknown,
+  verifiedPolicy: unknown,
+): ResponseDecisionV1 {
+  return evaluateCheckResult(input, verifiedPolicy);
 }

@@ -5,7 +5,7 @@ import type {
 } from '@sigilcore/warrant-core';
 
 import {
-  checkResult,
+  checkResultWithVerifiedPolicy,
   type CheckResultInput,
   type ResponseDecisionV1,
 } from './check-result.js';
@@ -21,6 +21,21 @@ const loadWarrantCoreVerifier = async () => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const readResultInput = (input: unknown): unknown => {
+  try {
+    if (!isRecord(input)) return {};
+    const descriptor = Object.getOwnPropertyDescriptor(input, 'result');
+    return descriptor !== undefined &&
+      'value' in descriptor &&
+      descriptor.get === undefined &&
+      descriptor.set === undefined
+      ? descriptor.value
+      : {};
+  } catch {
+    return {};
+  }
+};
 
 const digestHex = async (
   adapter: CryptoAdapter,
@@ -117,19 +132,16 @@ export interface VerifyAndCheckResultInput {
 export async function verifyAndCheckResult(
   input: VerifyAndCheckResultInput,
 ): Promise<ResponseDecisionV1> {
+  const result = readResultInput(input);
   try {
     const verifiedPolicy = await verifyResponsePolicyAuthorization(
       input.adapter,
       input.authorization,
       input.trustedContext,
     );
-    return checkResult({ ...input.result, verifiedPolicy });
+    return checkResultWithVerifiedPolicy(result, verifiedPolicy);
   } catch {
-    const result = isRecord(input) && isRecord(input.result) ? input.result : {};
-    return checkResult({
-      ...result,
-      verifiedPolicy: undefined,
-    } as unknown as CheckResultInput);
+    return checkResultWithVerifiedPolicy(result, undefined);
   }
 }
 

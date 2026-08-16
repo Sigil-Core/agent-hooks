@@ -239,6 +239,35 @@ describe('Policy 2.2 signed-envelope verification', () => {
     });
   });
 
+  it('does not invoke a response-controlled getter while constructing a fallback', async () => {
+    const fixture = await signedFixture();
+    let getterCalls = 0;
+    const result = resultInput() as unknown as Record<string, unknown>;
+    Object.defineProperty(result, 'projection', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('must not run');
+      },
+    });
+
+    const decision = await verifyAndCheckResult({
+      adapter: fixture.adapter,
+      authorization: {
+        ...fixture.authorization,
+        envelopeDigest: '9'.repeat(64),
+      },
+      trustedContext: fixture.context,
+      result: result as never,
+    });
+
+    expect(decision).toMatchObject({
+      disposition: 'BLOCK',
+      reason: 'evaluator_failure',
+    });
+    expect(getterCalls).toBe(0);
+  });
+
   it('verifies and evaluates locally with zero response egress', async () => {
     const fixture = await signedFixture();
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
