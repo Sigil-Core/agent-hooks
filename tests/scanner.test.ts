@@ -321,6 +321,31 @@ describe('Release 2 operator scanner boundary', () => {
     expect(JSON.stringify(decision)).not.toContain('secret failure');
   });
 
+  it('enforces maxFindings across deterministic and scanner findings', async () => {
+    const projected = projection('contact alice@example.test');
+    const scannerFinding = finding(projected, 'alice@example.test');
+    const decision = await checkResultV2(input(policy({
+      scanner: {
+        required: true,
+        profile: 'operator-presidio-v1',
+        classes: ['pii'],
+        minConfidence: 0.85,
+      },
+    }), projected, {
+      transport: transport((request) => response(
+        request,
+        Array.from({ length: 256 }, () => scannerFinding),
+      )),
+    }));
+
+    expect(decision).toMatchObject({
+      disposition: 'BLOCK',
+      reason: 'scanner_failure',
+      scannerEvidence: { status: 'failed', reason: 'findings_limit', required: true },
+    });
+    expect(decision.findings).toHaveLength(1);
+  });
+
   it.each([
     ['confidence', (request: ScannerRequestV1, projected: ResultProjectionV1) => {
       const item = finding(projected, 'ordinary');

@@ -582,6 +582,9 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
     const reason = error instanceof ScannerValidationError ? error.reason : 'schema';
     return scannerFailure(decision, reason, required);
   }
+  if (decision.findings.length + response.findings.length > policy.bounds.maxFindings) {
+    return scannerFailure(decision, 'findings_limit', required);
+  }
 
   const observeClasses = new Set(policy.policy.observe?.classes ?? []);
   const observeActive = decision.observe.active;
