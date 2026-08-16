@@ -156,6 +156,20 @@ interface ParsedScannerResponse {
   findings: ParsedScannerFinding[];
 }
 
+class ScannerValidationError extends Error {
+  constructor(readonly reason: ScannerFailureReason) {
+    super(reason);
+  }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const exactKeys = (value: Record<string, unknown>, expected: readonly string[]): boolean => {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+};
+
 function readAuthenticatedTransportBody(value: unknown): Uint8Array {
   try {
     if (!isRecord(value) || Object.getOwnPropertySymbols(value).length !== 0) {
@@ -182,20 +196,6 @@ function readAuthenticatedTransportBody(value: unknown): Uint8Array {
     throw new ScannerValidationError('schema');
   }
 }
-
-class ScannerValidationError extends Error {
-  constructor(readonly reason: ScannerFailureReason) {
-    super(reason);
-  }
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-const exactKeys = (value: Record<string, unknown>, expected: readonly string[]): boolean => {
-  const keys = Object.keys(value);
-  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
-};
 
 const sha256 = (value: Uint8Array | string): string =>
   createHash('sha256').update(value).digest('hex');
