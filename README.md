@@ -22,7 +22,7 @@ For a covered approval, `checkIntent` returns `responsePolicy.compactJws`, its
 compiled-payload digest, its envelope digest, and the separate
 `intentAttestation`. The three response-policy fields are atomic: a partial or
 malformed triple fails through the configured fail mode. Verify the compact JWS
-with exact `@sigilcore/warrant-core` `0.3.0` and trusted issuer, key, tenant,
+with exact `@sigilcore/warrant-core` `0.4.0` and trusted issuer, key, tenant,
 task, policy-hash, revocation, ruleset, catalog, and clock context before
 passing the resulting verified payload to `checkResult`. The SDK never labels
 untrusted authorization JSON as verified policy.

@@ -20,6 +20,7 @@ export const SCANNER_PROTOCOL_VERSION = 'sof-operator-scanner/v1' as const;
 
 const HEX_64 = /^[0-9a-f]{64}$/;
 const PROFILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const SCANNER_IDENTITY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CONFIDENCE = /^(?:0|1|0\.[0-9]{0,3}[1-9])$/;
 const MAX_FINDINGS = 256;
 const MAX_RESPONSE_BYTES = 1_048_576;
@@ -153,6 +154,33 @@ interface ParsedScannerResponse {
   scannerId: string;
   rulesetVersion: string;
   findings: ParsedScannerFinding[];
+}
+
+function readAuthenticatedTransportBody(value: unknown): Uint8Array {
+  try {
+    if (!isRecord(value) || Object.getOwnPropertySymbols(value).length !== 0) {
+      throw new ScannerValidationError('schema');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const authenticated = descriptors.authenticated;
+    if (!authenticated || !('value' in authenticated) || authenticated.get || authenticated.set) {
+      throw new ScannerValidationError('schema');
+    }
+    if (authenticated.value !== true) {
+      throw new ScannerValidationError('authentication');
+    }
+    if (!exactKeys(value, ['authenticated', 'body'])) {
+      throw new ScannerValidationError('schema');
+    }
+    const body = descriptors.body;
+    if (!body || !('value' in body) || body.get || body.set || !(body.value instanceof Uint8Array)) {
+      throw new ScannerValidationError('schema');
+    }
+    return body.value;
+  } catch (error) {
+    if (error instanceof ScannerValidationError) throw error;
+    throw new ScannerValidationError('schema');
+  }
 }
 
 class ScannerValidationError extends Error {
@@ -475,8 +503,8 @@ function validateScannerResponse(
     throw new ScannerValidationError('binding');
   }
   if (
-    typeof value.scannerId !== 'string' || value.scannerId === '' ||
-    typeof value.rulesetVersion !== 'string' || value.rulesetVersion === '' ||
+    typeof value.scannerId !== 'string' || !SCANNER_IDENTITY.test(value.scannerId) ||
+    typeof value.rulesetVersion !== 'string' || !SCANNER_IDENTITY.test(value.rulesetVersion) ||
     !Array.isArray(value.findings)
   ) {
     throw new ScannerValidationError('schema');
@@ -620,16 +648,14 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
     const reason = error instanceof ScannerValidationError ? error.reason : 'transport';
     return scannerFailure(decision, reason, required);
   }
-  if (!isRecord(transportResult) || transportResult.authenticated !== true) {
-    return scannerFailure(decision, 'authentication', required);
-  }
-  if (!(transportResult.body instanceof Uint8Array) || sha256(content) !== request.contentDigest) {
-    return scannerFailure(decision, 'schema', required);
-  }
-
+  let responseBody: Uint8Array;
   let response: ParsedScannerResponse;
   try {
-    response = validateScannerResponse(checkedInput, request, transportResult.body);
+    responseBody = readAuthenticatedTransportBody(transportResult);
+    if (sha256(content) !== request.contentDigest) {
+      throw new ScannerValidationError('schema');
+    }
+    response = validateScannerResponse(checkedInput, request, responseBody);
   } catch (error) {
     const reason = error instanceof ScannerValidationError ? error.reason : 'schema';
     return scannerFailure(decision, reason, required);
@@ -659,7 +685,7 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
     status: 'verified',
     scannerId: response.scannerId,
     rulesetVersion: response.rulesetVersion,
-    responseDigest: sha256(transportResult.body),
+    responseDigest: sha256(responseBody),
     findingCount: response.findings.length,
   });
 

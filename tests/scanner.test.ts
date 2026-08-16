@@ -328,6 +328,72 @@ describe('Release 2 operator scanner boundary', () => {
     expect(JSON.stringify(decision)).not.toContain('secret failure');
   });
 
+  it.each([
+    ['proxy', new Proxy({}, { getOwnPropertyDescriptor: () => { throw new TypeError('hostile proxy'); } })],
+    ['authenticated accessor', Object.defineProperty({}, 'authenticated', {
+      enumerable: true,
+      get: () => true,
+    })],
+    ['body accessor', Object.defineProperties({}, {
+      authenticated: { enumerable: true, value: true },
+      body: { enumerable: true, get: () => new Uint8Array() },
+    })],
+  ])('contains malformed scanner transport result %s', async (_label, malformed) => {
+    const projected = projection('ordinary output');
+    const requiredPolicy = policy({
+      scanner: {
+        required: true,
+        profile: 'operator-presidio-v1',
+        classes: ['pii'],
+        minConfidence: 0.85,
+      },
+    });
+    const optionalPolicy = policy({
+      scanner: {
+        required: false,
+        profile: 'operator-presidio-v1',
+        classes: ['pii'],
+        minConfidence: 0.85,
+      },
+    });
+    const scanner = {
+      transport: {
+        scan: () => Promise.resolve(malformed as never),
+      },
+    };
+
+    await expect(checkResultV2(input(requiredPolicy, projected, scanner))).resolves.toMatchObject({
+      disposition: 'BLOCK',
+      reason: 'scanner_failure',
+      scannerEvidence: { status: 'failed', reason: 'schema', required: true },
+    });
+    await expect(checkResultV2(input(optionalPolicy, projected, scanner))).resolves.toMatchObject({
+      disposition: 'ALLOW',
+      scannerEvidence: { status: 'failed', reason: 'schema', required: false },
+    });
+  });
+
+  it.each([
+    ['scannerId', 'x'.repeat(129)],
+    ['scannerId', 'scanner:id'],
+    ['rulesetVersion', 'x'.repeat(129)],
+    ['rulesetVersion', 'ruleset/version'],
+  ])('rejects unbounded or non-opaque scanner identity field %s', async (field, value) => {
+    const projected = projection('ordinary output');
+    const decision = await checkResultV2(input(policy({
+      scanner: {
+        required: true,
+        profile: 'operator-presidio-v1',
+        classes: ['pii'],
+        minConfidence: 0.85,
+      },
+    }), projected, {
+      transport: transport((request) => response(request, [], { [field]: value })),
+    }));
+
+    expect(decision.scannerEvidence).toEqual({ status: 'failed', reason: 'schema', required: true });
+  });
+
   it('enforces maxFindings across deterministic and scanner findings', async () => {
     const projected = projection('contact alice@example.test');
     const scannerFinding = finding(projected, 'alice@example.test');

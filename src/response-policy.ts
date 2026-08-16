@@ -97,7 +97,7 @@ const validateAuthorization = (
 };
 
 /**
- * Verifies Sign's compact Policy 2.2 envelope with exact Warrant Core 0.3.0.
+ * Verifies Sign's compact Policy 2.2 envelope with exact Warrant Core 0.4.0.
  * Every trust binding comes from caller-supplied context; no envelope claim is
  * promoted into verification context. The response body remains local.
  */
