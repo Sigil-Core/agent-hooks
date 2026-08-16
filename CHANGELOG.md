@@ -2,6 +2,39 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-07
+
+### Added
+
+- Policy 2.2 format-1 `checkResult`, separate from `checkIntent`, with
+  schema-closed ALLOW/BLOCK decisions and exact execution, request, result,
+  tenant, task, tool, policy, content-type, authorization, and projection
+  bindings.
+- Exact Warrant Core `0.3.0` signed-envelope verification through
+  `verifyResponsePolicyAuthorization`, plus the fail-closed
+  `verifyAndCheckResult` composition. Verification context remains
+  caller-supplied trusted state and is never derived from envelope claims.
+- Frozen `sof-rp-projection-v1` framing for SDK-decoded MCP
+  `CallToolResult` values. Text, embedded-resource text, resource-link strings,
+  and canonical structured content are covered; binary, mixed, unknown,
+  oversized, over-depth, or malformed results fail closed.
+- Pinned `sof-response-rules-v1` and `sof-response-classes-v1` manifests,
+  digests, deterministic local findings, exact response-literal matching, and
+  UTF-8 byte offsets over the framed projection.
+- Adversarial tests for binary refusal, mixed-result refusal, depth bounds,
+  canonical structured content, `isError` parity, binding failures, expiry,
+  projection tampering, Unicode non-normalization, exact literals, and zero
+  response egress.
+
+### Security
+
+- Result bytes have no path to Sign, `fetch`, logging, diagnostics, callbacks,
+  telemetry, or hosted receipts. Covered calls fail closed regardless of the
+  general TypeScript client's pre-execution fail-mode default.
+- `checkResult` accepts only a format-1 policy payload already verified by the
+  Warrant Core compact-JWS verifier. Callers must never construct the verified
+  policy object from untrusted JSON.
+
 ## [0.7.0] - 2026-08-02
 
 Version note: this release is `0.7.0`, not `0.6.0`, because `0.6.0` shipped to npm on 2026-08-02 carrying only the basic Cowork adapter. The remaining Phase C surface below is additive public API, hence a further minor bump.

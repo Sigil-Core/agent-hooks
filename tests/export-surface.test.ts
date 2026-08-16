@@ -76,4 +76,18 @@ describe('package export surface', () => {
       expect(constant.startsWith('SIGIL_')).toBe(true);
     }
   });
+
+  it('exports the separate local result-inspection surface', () => {
+    expect(typeof pkg.checkResult).toBe('function');
+    expect(typeof pkg.projectCallToolResult).toBe('function');
+    expect(typeof pkg.verifyResponsePolicyAuthorization).toBe('function');
+    expect(typeof pkg.verifyAndCheckResult).toBe('function');
+    expect(pkg.RESULT_PROJECTION_VERSION).toBe('sof-rp-projection-v1');
+    expect(pkg.RESULT_PROJECTION_CONTENT_TYPE).toBe(
+      'application/vnd.sigil.response-projection.v1',
+    );
+    expect(pkg.CALL_TOOL_RESULT_CONTENT_TYPE).toBe(
+      'application/vnd.modelcontextprotocol.call-tool-result+json',
+    );
+  });
 });

@@ -33,6 +33,77 @@ describe('checkIntent', () => {
     expect(result.policyHash).toBe('abc123');
   });
 
+  it('preserves atomic response-policy authorization material for local verification', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'APPROVED',
+          policy_hash: 'a'.repeat(64),
+          intent_attestation: 'header.payload.signature',
+          compiled_response_policy: 'policy.payload.signature',
+          compiled_policy_digest: 'b'.repeat(64),
+          compiled_policy_envelope_digest: 'c'.repeat(64),
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await checkIntent(
+      { action: 'mcp.example.server.fetch', taskId: 'task-1' },
+      { ...BASE_CONFIG, failMode: 'closed' },
+    );
+
+    expect(result).toMatchObject({
+      decision: 'APPROVED',
+      policyHash: 'a'.repeat(64),
+      intentAttestation: 'header.payload.signature',
+      responsePolicy: {
+        compactJws: 'policy.payload.signature',
+        compiledPolicyDigest: 'b'.repeat(64),
+        envelopeDigest: 'c'.repeat(64),
+      },
+    });
+  });
+
+  it.each([
+    {
+      compiled_response_policy: 'policy.payload.signature',
+    },
+    {
+      compiled_response_policy: 'policy.payload.signature',
+      compiled_policy_digest: 'b'.repeat(64),
+    },
+    {
+      compiled_response_policy: 7,
+      compiled_policy_digest: 'b'.repeat(64),
+      compiled_policy_envelope_digest: 'c'.repeat(64),
+    },
+    {
+      compiled_response_policy: null,
+      compiled_policy_digest: null,
+      compiled_policy_envelope_digest: null,
+    },
+    {
+      compiled_response_policy: 'policy.payload.signature',
+      compiled_policy_digest: null,
+      compiled_policy_envelope_digest: 'c'.repeat(64),
+    },
+  ])('fails closed for a partial or malformed response-policy triple: %#', async (fields) => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'APPROVED', ...fields }), { status: 200 }),
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const result = await checkIntent(
+      { action: 'mcp.example.server.fetch' },
+      { ...BASE_CONFIG, failMode: 'closed' },
+    );
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: SIGIL_UNREACHABLE,
+    });
+    warnSpy.mockRestore();
+  });
+
   it('returns DENIED for a blocked bash command', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(

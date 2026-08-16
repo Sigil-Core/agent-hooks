@@ -41,6 +41,14 @@ const OPTIONAL_STRING_FIELDS = [
   'message',
   'error_code',
   'errorCode',
+  'intent_attestation',
+  'intentAttestation',
+  'compiled_response_policy',
+  'compiledResponsePolicy',
+  'compiled_policy_digest',
+  'compiledPolicyDigest',
+  'compiled_policy_envelope_digest',
+  'compiledPolicyEnvelopeDigest',
 ] as const;
 
 const parseResponseData = async (
@@ -80,6 +88,79 @@ const throwInvalidAuthorizationResponse = (): never => {
 const hasValidPendingHold = (data: Record<string, unknown>): boolean =>
   data['status'] !== 'PENDING' || getHoldId(data) !== undefined;
 
+const getAliasedString = (
+  data: Record<string, unknown>,
+  snake: string,
+  camel: string,
+): string | undefined => getString(data[snake]) ?? getString(data[camel]);
+
+const hasConsistentStringAlias = (
+  data: Record<string, unknown>,
+  snake: string,
+  camel: string,
+): boolean => {
+  const snakeValue = getString(data[snake]);
+  const camelValue = getString(data[camel]);
+  return snakeValue === undefined || camelValue === undefined || snakeValue === camelValue;
+};
+
+const RESPONSE_POLICY_AUTHORIZATION_FIELDS = [
+  'compiled_response_policy',
+  'compiledResponsePolicy',
+  'compiled_policy_digest',
+  'compiledPolicyDigest',
+  'compiled_policy_envelope_digest',
+  'compiledPolicyEnvelopeDigest',
+] as const;
+
+const hasCompleteResponsePolicyAuthorization = (
+  data: Record<string, unknown>,
+): boolean => {
+  if (
+    RESPONSE_POLICY_AUTHORIZATION_FIELDS.some(
+      (field) =>
+        Object.prototype.hasOwnProperty.call(data, field) &&
+        typeof data[field] !== 'string',
+    )
+  ) {
+    return false;
+  }
+  if (
+    !hasConsistentStringAlias(
+      data,
+      'compiled_response_policy',
+      'compiledResponsePolicy',
+    ) ||
+    !hasConsistentStringAlias(
+      data,
+      'compiled_policy_digest',
+      'compiledPolicyDigest',
+    ) ||
+    !hasConsistentStringAlias(
+      data,
+      'compiled_policy_envelope_digest',
+      'compiledPolicyEnvelopeDigest',
+    )
+  ) {
+    return false;
+  }
+  const fields = [
+    getAliasedString(data, 'compiled_response_policy', 'compiledResponsePolicy'),
+    getAliasedString(data, 'compiled_policy_digest', 'compiledPolicyDigest'),
+    getAliasedString(
+      data,
+      'compiled_policy_envelope_digest',
+      'compiledPolicyEnvelopeDigest',
+    ),
+  ];
+  const present = fields.filter((value) => value !== undefined);
+  return present.length === 0 || (
+    data['status'] === 'APPROVED' &&
+    present.length === fields.length &&
+    present.every((value) => value !== '')
+  );
+};
+
 const resolveAuthorizationData = (
   data: Record<string, unknown>,
 ): AuthorizationHttpResult => {
@@ -91,6 +172,9 @@ const resolveAuthorizationData = (
     return throwInvalidAuthorizationResponse();
   }
   if (!hasValidPendingHold(data)) {
+    return throwInvalidAuthorizationResponse();
+  }
+  if (!hasCompleteResponsePolicyAuthorization(data)) {
     return throwInvalidAuthorizationResponse();
   }
   return { data };
@@ -180,7 +264,15 @@ const readStrictResponseBody = async (
   return { bytes: concatChunks(chunks, total) };
 };
 
-const STRICT_APPROVED_KEYS = new Set(['status', 'policy_hash', 'task_id']);
+const STRICT_APPROVED_KEYS = new Set([
+  'status',
+  'policy_hash',
+  'task_id',
+  'intent_attestation',
+  'compiled_response_policy',
+  'compiled_policy_digest',
+  'compiled_policy_envelope_digest',
+]);
 
 const isOptionalStrictString = (
   data: Record<string, unknown>,
@@ -199,7 +291,12 @@ const isStrictValidApproved = (data: Record<string, unknown>): boolean =>
   data['status'] === 'APPROVED' &&
   Object.keys(data).every((key) => STRICT_APPROVED_KEYS.has(key)) &&
   isOptionalStrictString(data, 'policy_hash') &&
-  isOptionalStrictString(data, 'task_id');
+  isOptionalStrictString(data, 'task_id') &&
+  isOptionalStrictString(data, 'intent_attestation') &&
+  isOptionalStrictString(data, 'compiled_response_policy') &&
+  isOptionalStrictString(data, 'compiled_policy_digest') &&
+  isOptionalStrictString(data, 'compiled_policy_envelope_digest') &&
+  hasCompleteResponsePolicyAuthorization(data);
 
 const isStrictValidDenied = (data: Record<string, unknown>): boolean =>
   data['status'] === 'DENIED' &&
@@ -390,10 +487,43 @@ const getPolicyHash = (
 
 const approvedResult = (
   data: Record<string, unknown>,
-): SigilHookResult => ({
-  decision: 'APPROVED',
-  policyHash: getPolicyHash(data),
-});
+): SigilHookResult => {
+  const compactJws = getAliasedString(
+    data,
+    'compiled_response_policy',
+    'compiledResponsePolicy',
+  );
+  const compiledPolicyDigest = getAliasedString(
+    data,
+    'compiled_policy_digest',
+    'compiledPolicyDigest',
+  );
+  const envelopeDigest = getAliasedString(
+    data,
+    'compiled_policy_envelope_digest',
+    'compiledPolicyEnvelopeDigest',
+  );
+  return {
+    decision: 'APPROVED',
+    policyHash: getPolicyHash(data),
+    intentAttestation: getAliasedString(
+      data,
+      'intent_attestation',
+      'intentAttestation',
+    ),
+    ...(compactJws !== undefined &&
+    compiledPolicyDigest !== undefined &&
+    envelopeDigest !== undefined
+      ? {
+          responsePolicy: {
+            compactJws,
+            compiledPolicyDigest,
+            envelopeDigest,
+          },
+        }
+      : {}),
+  };
+};
 
 const pendingResult = (
   data: Record<string, unknown>,
