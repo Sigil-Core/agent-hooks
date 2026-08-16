@@ -134,6 +134,7 @@ function resultInput(): Omit<CheckResultInput, 'verifiedPolicy'> {
     requestIdDigest: '5'.repeat(64),
     requestDigest: '6'.repeat(64),
     resultDigest: '7'.repeat(64),
+    projectionDigest: projected.projection.digest,
   };
   return {
     trustedBindings,

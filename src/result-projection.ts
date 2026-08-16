@@ -41,6 +41,56 @@ interface PendingRecord {
   value: string;
 }
 
+class ProjectionLimitError extends Error {}
+
+class BoundedUtf8Writer {
+  private readonly parts: string[] = [];
+  private pending = '';
+  private pendingBytes = 0;
+  private remaining: number;
+
+  constructor(limit: number) {
+    this.remaining = limit;
+  }
+
+  append(value: string): void {
+    const bytes = Buffer.byteLength(value, 'utf8');
+    if (bytes > this.remaining) throw new ProjectionLimitError('Projection limit exceeded.');
+    if (this.pendingBytes > 0 && this.pendingBytes + bytes > 8192) {
+      this.parts.push(this.pending);
+      this.pending = '';
+      this.pendingBytes = 0;
+    }
+    if (bytes > 8192) this.parts.push(value);
+    else {
+      this.pending += value;
+      this.pendingBytes += bytes;
+    }
+    this.remaining -= bytes;
+  }
+
+  finish(): string {
+    return this.pendingBytes > 0 ? [...this.parts, this.pending].join('') : this.parts.join('');
+  }
+}
+
+const pendingRecordBytes = new WeakMap<PendingRecord[], number>();
+
+function usedRecordBytes(records: PendingRecord[]): number {
+  return pendingRecordBytes.get(records) ?? PROJECTION_MAGIC.length + 4;
+}
+
+function pushRecord(records: PendingRecord[], path: string, value: string): void {
+  const next = usedRecordBytes(records)
+    + 4 + Buffer.byteLength(path, 'utf8')
+    + 8 + Buffer.byteLength(value, 'utf8');
+  if (next > MAX_RESULT_PROJECTION_BYTES) {
+    throw new ProjectionLimitError('Projection limit exceeded.');
+  }
+  records.push({ path, value });
+  pendingRecordBytes.set(records, next);
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -98,14 +148,40 @@ function jsonDepth(value: unknown, depth = 1): number {
   return depth;
 }
 
-function canonicalJson(value: unknown, stack = new Set<object>()): string {
-  if (value === null) return 'null';
+function appendJsonString(value: string, writer: BoundedUtf8Writer): void {
+  writer.append('"');
+  for (let start = 0; start < value.length;) {
+    let end = Math.min(start + 4096, value.length);
+    const last = value.charCodeAt(end - 1);
+    const next = value.charCodeAt(end);
+    if (end < value.length && last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+      end += 1;
+    }
+    const encoded = JSON.stringify(value.slice(start, end));
+    writer.append(encoded.slice(1, -1));
+    start = end;
+  }
+  writer.append('"');
+}
+
+function appendCanonicalJson(
+  value: unknown,
+  writer: BoundedUtf8Writer,
+  stack: Set<object>,
+): void {
+  if (value === null) {
+    writer.append('null');
+    return;
+  }
   if (typeof value === 'string' || typeof value === 'boolean') {
-    return JSON.stringify(value);
+    if (typeof value === 'string') appendJsonString(value, writer);
+    else writer.append(JSON.stringify(value));
+    return;
   }
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new TypeError('Non-finite JSON number.');
-    return JSON.stringify(value);
+    writer.append(JSON.stringify(value));
+    return;
   }
   if (typeof value !== 'object' || value === undefined) {
     throw new TypeError('Non-JSON projection value.');
@@ -120,7 +196,13 @@ function canonicalJson(value: unknown, stack = new Set<object>()): string {
       for (let index = 0; index < value.length; index += 1) {
         if (!Object.hasOwn(value, index)) throw new TypeError('Sparse projection array.');
       }
-      return `[${value.map((item) => canonicalJson(item, stack)).join(',')}]`;
+      writer.append('[');
+      for (let index = 0; index < value.length; index += 1) {
+        if (index > 0) writer.append(',');
+        appendCanonicalJson(value[index], writer, stack);
+      }
+      writer.append(']');
+      return;
     }
     if (!isRecord(value) || !isPlainObject(value)) {
       throw new TypeError('Non-plain projection object.');
@@ -130,21 +212,37 @@ function canonicalJson(value: unknown, stack = new Set<object>()): string {
     }
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const keys = Object.keys(descriptors).sort();
-    return `{${keys
-      .map((key) => {
-        const descriptor = descriptors[key];
-        if (!descriptor || !('value' in descriptor) || descriptor.get || descriptor.set) {
-          throw new TypeError('Accessor projection object.');
-        }
-        if (descriptor.value === undefined) {
-          throw new TypeError('Undefined projection value.');
-        }
-        return `${JSON.stringify(key)}:${canonicalJson(descriptor.value, stack)}`;
-      })
-      .join(',')}}`;
+    writer.append('{');
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index];
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor) || descriptor.get || descriptor.set) {
+        throw new TypeError('Accessor projection object.');
+      }
+      if (descriptor.value === undefined) {
+        throw new TypeError('Undefined projection value.');
+      }
+      if (index > 0) writer.append(',');
+      appendJsonString(key, writer);
+      writer.append(':');
+      appendCanonicalJson(descriptor.value, writer, stack);
+    }
+    writer.append('}');
   } finally {
     stack.delete(value);
   }
+}
+
+function canonicalJson(value: unknown, limit: number): string {
+  const writer = new BoundedUtf8Writer(limit);
+  appendCanonicalJson(value, writer, new Set<object>());
+  return writer.finish();
+}
+
+function remainingRecordValueBytes(records: PendingRecord[], path: string): number {
+  return MAX_RESULT_PROJECTION_BYTES
+    - usedRecordBytes(records)
+    - 4 - Buffer.byteLength(path, 'utf8') - 8;
 }
 
 function appendString(
@@ -153,7 +251,7 @@ function appendString(
   value: unknown,
 ): boolean {
   if (typeof value !== 'string') return false;
-  records.push({ path, value });
+  pushRecord(records, path, value);
   return true;
 }
 
@@ -162,7 +260,9 @@ function appendCanonical(
   path: string,
   value: unknown,
 ): void {
-  records.push({ path, value: canonicalJson(value) });
+  const remaining = remainingRecordValueBytes(records, path);
+  if (remaining < 0) throw new ProjectionLimitError('Projection limit exceeded.');
+  pushRecord(records, path, canonicalJson(value, remaining));
 }
 
 function appendOptionalMetadata(
@@ -310,10 +410,7 @@ export function projectCallToolResult(result: unknown): ProjectCallToolResult {
       if (jsonDepth(result.structuredContent) > MAX_RESULT_NESTING_DEPTH) {
         return { ok: false, reason: 'nesting_limit' };
       }
-      records.push({
-        path: '/structuredContent',
-        value: canonicalJson(result.structuredContent),
-      });
+      appendCanonical(records, '/structuredContent', result.structuredContent);
     }
     if (Object.hasOwn(result, '_meta')) {
       appendCanonical(records, '/_meta', result._meta);
@@ -322,7 +419,8 @@ export function projectCallToolResult(result: unknown): ProjectCallToolResult {
     return projection
       ? { ok: true, projection }
       : { ok: false, reason: 'projection_limit' };
-  } catch {
+  } catch (error) {
+    if (error instanceof ProjectionLimitError) return { ok: false, reason: 'projection_limit' };
     return { ok: false, reason: 'evaluator_failure' };
   }
 }

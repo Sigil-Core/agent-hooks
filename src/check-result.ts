@@ -54,6 +54,7 @@ export interface TrustedResultBindings {
   requestIdDigest: string;
   requestDigest: string;
   resultDigest: string;
+  projectionDigest: string;
 }
 
 export interface CheckResultInput {
@@ -365,6 +366,7 @@ function findByteMatches(
   pattern: RegExp,
   responseClass: ResponseClass,
   ruleId: string,
+  limit: number,
 ): ResponseFinding[] {
   const findings: ResponseFinding[] = [];
   for (const record of projection.records) {
@@ -383,6 +385,7 @@ function findByteMatches(
         rulesetVersion: 'sof-response-rules-v1',
         ruleId,
       });
+      if (findings.length >= limit) return findings;
     }
   }
   return findings;
@@ -403,6 +406,7 @@ function validateProjection(projection: ResultProjectionV1): boolean {
   const digest = createHash('sha256').update(projection.bytes).digest('hex');
   if (!sameString(digest, projection.digest)) return false;
   const bytes = Buffer.from(projection.bytes);
+  if (bytes.length > MAX_RESULT_PROJECTION_BYTES) return false;
   const magic = Buffer.from('SOF-RP-PROJECTION-1\n', 'ascii');
   if (
     bytes.length < magic.length + 4 ||
@@ -414,7 +418,6 @@ function validateProjection(projection: ResultProjectionV1): boolean {
   if (recordCount !== projection.records.length) return false;
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let offset = magic.length + 4;
-  let projectedValueBytes = 0;
   for (const record of projection.records) {
     if (offset + 4 > bytes.length) return false;
     const pathLength = bytes.readUInt32BE(offset);
@@ -431,8 +434,6 @@ function validateProjection(projection: ResultProjectionV1): boolean {
     offset += 8;
     if (valueLengthBig > BigInt(Number.MAX_SAFE_INTEGER)) return false;
     const valueLength = Number(valueLengthBig);
-    projectedValueBytes += valueLength;
-    if (projectedValueBytes > MAX_RESULT_PROJECTION_BYTES) return false;
     if (offset + valueLength > bytes.length) return false;
     const start = offset;
     const end = offset + valueLength;
@@ -497,7 +498,8 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
       !sameString(input.authorizationBinding, input.trustedBindings.authorizationBinding) ||
       !sameString(input.requestIdDigest, input.trustedBindings.requestIdDigest) ||
       !sameString(input.requestDigest, input.trustedBindings.requestDigest) ||
-      !sameString(input.resultDigest, input.trustedBindings.resultDigest)
+      !sameString(input.resultDigest, input.trustedBindings.resultDigest) ||
+      !sameString(input.projection.digest, input.trustedBindings.projectionDigest)
     ) {
       decision.reason = 'binding_mismatch';
       return Object.freeze(decision);
@@ -526,8 +528,9 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
 
     const findings: ResponseFinding[] = [];
     for (const rule of RULES) {
+      const remaining = EXPECTED_BOUNDS.maxFindings - findings.length + 1;
       findings.push(
-        ...findByteMatches(input.projection, rule.pattern, rule.class, rule.id),
+        ...findByteMatches(input.projection, rule.pattern, rule.class, rule.id, remaining),
       );
       if (findings.length > EXPECTED_BOUNDS.maxFindings) {
         decision.reason = 'evaluator_failure';
@@ -536,12 +539,14 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
     }
     for (const literal of policy.policy.denyStrings ?? []) {
       const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const remaining = EXPECTED_BOUNDS.maxFindings - findings.length + 1;
       findings.push(
         ...findByteMatches(
           input.projection,
           new RegExp(escaped, 'gu'),
           'prompt_injection',
           `response.deny_string:${createHash('sha256').update(literal).digest('hex')}`,
+          remaining,
         ),
       );
       if (findings.length > EXPECTED_BOUNDS.maxFindings) {
