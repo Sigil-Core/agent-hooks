@@ -141,7 +141,7 @@ export async function verifyAndCheckResult(
     );
     return checkResultWithVerifiedPolicy(result, verifiedPolicy);
   } catch {
-    return checkResultWithVerifiedPolicy(result, undefined);
+    return checkResultWithVerifiedPolicy(result);
   }
 }
 

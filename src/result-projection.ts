@@ -221,12 +221,11 @@ function appendCanonicalJson(
     if (Object.getOwnPropertySymbols(value).length !== 0) {
       throw new TypeError('Symbol-keyed projection object.');
     }
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    const keys = Object.keys(descriptors).sort();
+    const keys = Object.keys(value).sort();
     writer.append('{');
     for (let index = 0; index < keys.length; index += 1) {
       const key = keys[index];
-      const descriptor = descriptors[key];
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor || !('value' in descriptor) || descriptor.get || descriptor.set) {
         throw new TypeError('Accessor projection object.');
       }
@@ -357,37 +356,39 @@ function collectContentRecord(
   return false;
 }
 
-function frameRecords(pending: readonly PendingRecord[]): ResultProjectionV1 | null {
-  const count = Buffer.alloc(4);
-  count.writeUInt32BE(pending.length);
-  const chunks: Buffer[] = [PROJECTION_MAGIC, count];
+function frameRecords(pending: PendingRecord[]): ResultProjectionV1 | null {
+  const totalBytes = usedRecordBytes(pending);
+  if (totalBytes > MAX_RESULT_PROJECTION_BYTES || pending.length > 0xffffffff) return null;
+  const bytes = Buffer.allocUnsafe(totalBytes);
+  PROJECTION_MAGIC.copy(bytes, 0);
+  bytes.writeUInt32BE(pending.length, PROJECTION_MAGIC.length);
   const records: ResultProjectionRecord[] = [];
-  let offset = PROJECTION_MAGIC.length + count.length;
+  let offset = PROJECTION_MAGIC.length + 4;
 
   for (const record of pending) {
     const pathBytes = Buffer.byteLength(record.path, 'utf8');
     const valueBytes = Buffer.byteLength(record.value, 'utf8');
     const end = offset + 4 + pathBytes + 8 + valueBytes;
     if (end > MAX_RESULT_PROJECTION_BYTES) return null;
-    const path = Buffer.from(record.path, 'utf8');
-    const value = Buffer.from(record.value, 'utf8');
-    const pathLength = Buffer.alloc(4);
-    pathLength.writeUInt32BE(path.length);
-    const valueLength = Buffer.alloc(8);
-    valueLength.writeBigUInt64BE(BigInt(value.length));
-    const start = offset + 4 + path.length + 8;
-    chunks.push(pathLength, path, valueLength, value);
-    records.push({ path: record.path, value: record.value, start, end });
+    bytes.writeUInt32BE(pathBytes, offset);
+    offset += 4;
+    if (bytes.write(record.path, offset, pathBytes, 'utf8') !== pathBytes) return null;
+    offset += pathBytes;
+    bytes.writeBigUInt64BE(BigInt(valueBytes), offset);
+    offset += 8;
+    const start = offset;
+    if (bytes.write(record.value, offset, valueBytes, 'utf8') !== valueBytes) return null;
+    records.push(Object.freeze({ path: record.path, value: record.value, start, end }));
     offset = end;
   }
 
-  const bytes = Buffer.concat(chunks);
+  if (offset !== totalBytes) return null;
   return Object.freeze({
     version: RESULT_PROJECTION_VERSION,
     contentType: RESULT_PROJECTION_CONTENT_TYPE,
     bytes,
     digest: createHash('sha256').update(bytes).digest('hex'),
-    records: Object.freeze(records.map((record) => Object.freeze(record))),
+    records: Object.freeze(records),
   });
 }
 

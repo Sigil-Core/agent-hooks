@@ -281,6 +281,26 @@ describe('MCP CallToolResult projection v1', () => {
     });
     expect(descriptorCopy).not.toHaveBeenCalled();
   });
+
+  it('canonicalizes a wide in-budget object without bulk descriptor copying', () => {
+    const descriptorCopy = vi.spyOn(Object, 'getOwnPropertyDescriptors');
+    const structuredContent = Object.fromEntries(
+      Array.from({ length: 5_000 }, (_, index) => [`key-${index.toString().padStart(5, '0')}`, null]),
+    );
+
+    expect(projectCallToolResult({ content: [], structuredContent }).ok).toBe(true);
+    expect(descriptorCopy).not.toHaveBeenCalled();
+  });
+
+  it('writes a wide record set into one preallocated frame without Buffer.concat', () => {
+    const concat = vi.spyOn(Buffer, 'concat');
+    const content = Array.from({ length: 5_000 }, () => ({ type: 'text', text: '' }));
+
+    const projected = projectCallToolResult({ content });
+    expect(projected.ok).toBe(true);
+    if (projected.ok) expect(projected.projection.records).toHaveLength(content.length);
+    expect(concat).not.toHaveBeenCalled();
+  });
 });
 
 describe('checkResult format 1', () => {

@@ -747,7 +747,7 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
 
 export function checkResultWithVerifiedPolicy(
   input: unknown,
-  verifiedPolicy: unknown,
+  verifiedPolicy?: unknown,
 ): ResponseDecisionV1 {
   return evaluateCheckResult(input, verifiedPolicy);
 }
