@@ -334,8 +334,10 @@ function validPolicy(policy: unknown): policy is VerifiedResponsePolicyV1 {
 
 function baseDecision(input: unknown): ResponseDecisionV1 {
   const candidate = isRecord(input) ? input : {};
-  const policy = isRecord(candidate['verifiedPolicy'])
-    ? candidate['verifiedPolicy']
+  const verifiedPolicy = ownDataValue(candidate, 'verifiedPolicy');
+  const projection = ownDataValue(candidate, 'projection');
+  const policy = isRecord(verifiedPolicy)
+    ? verifiedPolicy
     : undefined;
   return {
     schema: 'sof-response-decision/v1',
@@ -346,12 +348,16 @@ function baseDecision(input: unknown): ResponseDecisionV1 {
     taskId: closedLabel(candidate['taskId']),
     tool: closedLabel(candidate['tool']),
     policyHash: closedHex(candidate['policyHash'], HEX_64, 64),
-    compiledPolicyDigest: closedHex(policy?.['compiledPolicyDigest'], HEX_64, 64),
+    compiledPolicyDigest: closedHex(
+      policy === undefined ? undefined : ownDataValue(policy, 'compiledPolicyDigest'),
+      HEX_64,
+      64,
+    ),
     authorizationBinding: closedHex(candidate['authorizationBinding'], HEX_64, 64),
     requestDigest: closedHex(candidate['requestDigest'], HEX_64, 64),
     resultDigest: closedHex(candidate['resultDigest'], HEX_64, 64),
     projectionDigest: closedHex(
-      isRecord(candidate['projection']) ? candidate['projection']['digest'] : undefined,
+      isRecord(projection) ? ownDataValue(projection, 'digest') : undefined,
       HEX_64,
       64,
     ),
@@ -360,6 +366,133 @@ function baseDecision(input: unknown): ResponseDecisionV1 {
     reason: 'envelope_invalid',
     findings: [],
   };
+}
+
+const CHECK_RESULT_INPUT_KEYS = [
+  'verifiedPolicy',
+  'trustedBindings',
+  'authorizationBinding',
+  'executionId',
+  'requestIdDigest',
+  'requestDigest',
+  'resultDigest',
+  'contentType',
+  'idempotencyKey',
+  'tool',
+  'tenantId',
+  'taskId',
+  'policyHash',
+  'projection',
+  'nowUnixSeconds',
+] as const;
+
+function ownDataValue(value: Record<string, unknown>, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) return undefined;
+  if (!('value' in descriptor) || descriptor.get !== undefined || descriptor.set !== undefined) {
+    throw new TypeError(`Accessor-backed checkResult field: ${key}`);
+  }
+  return descriptor.value;
+}
+
+function readCheckResultInput(input: unknown): CheckResultInput {
+  if (!isRecord(input)) throw new TypeError('checkResult input must be an object.');
+  const checked: Record<string, unknown> = {};
+  for (const key of CHECK_RESULT_INPUT_KEYS) {
+    const value = ownDataValue(input, key);
+    if (value !== undefined || Object.hasOwn(input, key)) checked[key] = value;
+  }
+  return checked as unknown as CheckResultInput;
+}
+
+interface JoinedTextRecord {
+  record: ResultProjectionV1['records'][number];
+  contentIndex: number;
+  charStart: number;
+  charEnd: number;
+}
+
+function locateJoinedRecord(
+  records: readonly JoinedTextRecord[],
+  charOffset: number,
+  endOffset: boolean,
+): number {
+  let low = 0;
+  let high = records.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const boundary = records[middle]?.charEnd ?? 0;
+    if (endOffset ? boundary >= charOffset : boundary > charOffset) high = middle;
+    else low = middle + 1;
+  }
+  return low;
+}
+
+function findJoinedTextByteMatches(
+  projection: ResultProjectionV1,
+  pattern: RegExp,
+  responseClass: ResponseClass,
+  ruleId: string,
+  limit: number,
+): ResponseFinding[] {
+  const findings: ResponseFinding[] = [];
+  let group: JoinedTextRecord[] = [];
+  let joinedParts: string[] = [];
+  let joinedLength = 0;
+
+  const scanGroup = (): boolean => {
+    if (group.length < 2) return false;
+    const joined = joinedParts.join('');
+    pattern.lastIndex = 0;
+    for (const match of joined.matchAll(pattern)) {
+      const text = match[0];
+      const charIndex = match.index;
+      if (text === '' || charIndex === undefined) continue;
+      const startIndex = locateJoinedRecord(group, charIndex, false);
+      const endIndex = locateJoinedRecord(group, charIndex + text.length, true);
+      if (startIndex === endIndex || startIndex >= group.length || endIndex >= group.length) continue;
+      const startRecord = group[startIndex];
+      const endRecord = group[endIndex];
+      if (startRecord === undefined || endRecord === undefined) continue;
+      const start = startRecord.record.start + Buffer.byteLength(
+        startRecord.record.value.slice(0, charIndex - startRecord.charStart),
+        'utf8',
+      );
+      const end = endRecord.record.start + Buffer.byteLength(
+        endRecord.record.value.slice(0, charIndex + text.length - endRecord.charStart),
+        'utf8',
+      );
+      findings.push({
+        class: responseClass,
+        start,
+        end,
+        evidenceDigest: createHash('sha256').update(text, 'utf8').digest('hex'),
+        rulesetVersion: 'sof-response-rules-v1',
+        ruleId,
+      });
+      if (findings.length >= limit) return true;
+    }
+    return false;
+  };
+
+  for (const record of projection.records) {
+    const pathMatch = /^\/content\/(\d+)\/text$/.exec(record.path);
+    if (pathMatch === null) continue;
+    const contentIndex = Number(pathMatch[1]);
+    const previous = group[group.length - 1];
+    if (previous !== undefined && contentIndex !== previous.contentIndex + 1) {
+      if (scanGroup()) return findings;
+      group = [];
+      joinedParts = [];
+      joinedLength = 0;
+    }
+    const charStart = joinedLength;
+    joinedParts.push(record.value);
+    joinedLength += record.value.length;
+    group.push({ record, contentIndex, charStart, charEnd: joinedLength });
+  }
+  scanGroup();
+  return findings;
 }
 
 function findByteMatches(
@@ -372,11 +505,16 @@ function findByteMatches(
   const findings: ResponseFinding[] = [];
   for (const record of projection.records) {
     pattern.lastIndex = 0;
+    let previousCharIndex = 0;
+    let previousByteOffset = record.start;
     for (const match of record.value.matchAll(pattern)) {
       const text = match[0];
       const charIndex = match.index;
       if (text === '' || charIndex === undefined) continue;
-      const start = record.start + Buffer.byteLength(record.value.slice(0, charIndex), 'utf8');
+      const start = previousByteOffset + Buffer.byteLength(
+        record.value.slice(previousCharIndex, charIndex),
+        'utf8',
+      );
       const end = start + Buffer.byteLength(text, 'utf8');
       findings.push({
         class: responseClass,
@@ -387,8 +525,17 @@ function findByteMatches(
         ruleId,
       });
       if (findings.length >= limit) return findings;
+      previousCharIndex = charIndex;
+      previousByteOffset = start;
     }
   }
+  findings.push(...findJoinedTextByteMatches(
+    projection,
+    pattern,
+    responseClass,
+    ruleId,
+    limit - findings.length,
+  ));
   return findings;
 }
 
@@ -463,56 +610,58 @@ function validateProjection(projection: ResultProjectionV1): boolean {
  * callbacks, diagnostics, logs, telemetry, or hosted receipts.
  */
 export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
-  const decision = baseDecision(input);
+  let decision = baseDecision({});
   try {
-    const policy = input.verifiedPolicy;
-    const now = input.nowUnixSeconds ?? Math.floor(Date.now() / 1000);
+    const checkedInput = readCheckResultInput(input);
+    decision = baseDecision(checkedInput);
+    const policy = checkedInput.verifiedPolicy;
+    const now = checkedInput.nowUnixSeconds ?? Math.floor(Date.now() / 1000);
     if (!validPolicy(policy)) return Object.freeze(decision);
     if (
-      !isRecord(input.trustedBindings) ||
-      typeof input.trustedBindings.executionId !== 'string' ||
-      !HEX_32.test(input.trustedBindings.executionId) ||
-      typeof input.executionId !== 'string' ||
-      !HEX_32.test(input.executionId) ||
-      typeof input.requestIdDigest !== 'string' ||
-      !HEX_64.test(input.requestIdDigest) ||
-      typeof input.authorizationBinding !== 'string' ||
-      !HEX_64.test(input.authorizationBinding) ||
-      typeof input.requestDigest !== 'string' ||
-      !HEX_64.test(input.requestDigest) ||
-      typeof input.resultDigest !== 'string' ||
-      !HEX_64.test(input.resultDigest) ||
-      typeof input.policyHash !== 'string' ||
-      !HEX_64.test(input.policyHash) ||
-      typeof input.idempotencyKey !== 'string' ||
-      input.idempotencyKey === '' ||
-      typeof input.tool !== 'string' ||
-      input.tool === '' ||
-      typeof input.tenantId !== 'string' ||
-      input.tenantId === '' ||
-      typeof input.taskId !== 'string' ||
-      input.taskId === '' ||
-      input.contentType !== CALL_TOOL_RESULT_CONTENT_TYPE
+      !isRecord(checkedInput.trustedBindings) ||
+      typeof checkedInput.trustedBindings.executionId !== 'string' ||
+      !HEX_32.test(checkedInput.trustedBindings.executionId) ||
+      typeof checkedInput.executionId !== 'string' ||
+      !HEX_32.test(checkedInput.executionId) ||
+      typeof checkedInput.requestIdDigest !== 'string' ||
+      !HEX_64.test(checkedInput.requestIdDigest) ||
+      typeof checkedInput.authorizationBinding !== 'string' ||
+      !HEX_64.test(checkedInput.authorizationBinding) ||
+      typeof checkedInput.requestDigest !== 'string' ||
+      !HEX_64.test(checkedInput.requestDigest) ||
+      typeof checkedInput.resultDigest !== 'string' ||
+      !HEX_64.test(checkedInput.resultDigest) ||
+      typeof checkedInput.policyHash !== 'string' ||
+      !HEX_64.test(checkedInput.policyHash) ||
+      typeof checkedInput.idempotencyKey !== 'string' ||
+      checkedInput.idempotencyKey === '' ||
+      typeof checkedInput.tool !== 'string' ||
+      checkedInput.tool === '' ||
+      typeof checkedInput.tenantId !== 'string' ||
+      checkedInput.tenantId === '' ||
+      typeof checkedInput.taskId !== 'string' ||
+      checkedInput.taskId === '' ||
+      checkedInput.contentType !== CALL_TOOL_RESULT_CONTENT_TYPE
     ) {
       decision.reason = 'binding_mismatch';
       return Object.freeze(decision);
     }
     if (
-      !sameString(input.executionId, input.trustedBindings.executionId) ||
-      !sameString(input.authorizationBinding, input.trustedBindings.authorizationBinding) ||
-      !sameString(input.requestIdDigest, input.trustedBindings.requestIdDigest) ||
-      !sameString(input.requestDigest, input.trustedBindings.requestDigest) ||
-      !sameString(input.resultDigest, input.trustedBindings.resultDigest) ||
-      !sameString(input.projection.digest, input.trustedBindings.projectionDigest)
+      !sameString(checkedInput.executionId, checkedInput.trustedBindings.executionId) ||
+      !sameString(checkedInput.authorizationBinding, checkedInput.trustedBindings.authorizationBinding) ||
+      !sameString(checkedInput.requestIdDigest, checkedInput.trustedBindings.requestIdDigest) ||
+      !sameString(checkedInput.requestDigest, checkedInput.trustedBindings.requestDigest) ||
+      !sameString(checkedInput.resultDigest, checkedInput.trustedBindings.resultDigest) ||
+      !sameString(checkedInput.projection.digest, checkedInput.trustedBindings.projectionDigest)
     ) {
       decision.reason = 'binding_mismatch';
       return Object.freeze(decision);
     }
     if (
-      !sameString(input.tenantId, policy.tenantId) ||
-      !sameString(input.taskId, policy.taskId) ||
-      !sameString(input.policyHash, policy.policyHash) ||
-      !policy.coveredTools.some((tool) => sameString(tool, input.tool))
+      !sameString(checkedInput.tenantId, policy.tenantId) ||
+      !sameString(checkedInput.taskId, policy.taskId) ||
+      !sameString(checkedInput.policyHash, policy.policyHash) ||
+      !policy.coveredTools.some((tool) => sameString(tool, checkedInput.tool))
     ) {
       decision.reason = 'binding_mismatch';
       return Object.freeze(decision);
@@ -525,7 +674,7 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
       decision.reason = 'envelope_invalid';
       return Object.freeze(decision);
     }
-    if (!validateProjection(input.projection)) {
+    if (!validateProjection(checkedInput.projection)) {
       decision.reason = 'evaluator_failure';
       return Object.freeze(decision);
     }
@@ -534,7 +683,7 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
     for (const rule of RULES) {
       const remaining = EXPECTED_BOUNDS.maxFindings - findings.length + 1;
       findings.push(
-        ...findByteMatches(input.projection, rule.pattern, rule.class, rule.id, remaining),
+        ...findByteMatches(checkedInput.projection, rule.pattern, rule.class, rule.id, remaining),
       );
       if (findings.length > EXPECTED_BOUNDS.maxFindings) {
         decision.reason = 'evaluator_failure';
@@ -546,7 +695,7 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
       const remaining = EXPECTED_BOUNDS.maxFindings - findings.length + 1;
       findings.push(
         ...findByteMatches(
-          input.projection,
+          checkedInput.projection,
           new RegExp(escaped, 'gu'),
           'prompt_injection',
           `response.deny_string:${createHash('sha256').update(literal).digest('hex')}`,
