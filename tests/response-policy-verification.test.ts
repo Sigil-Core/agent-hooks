@@ -130,6 +130,7 @@ function resultInput(): Omit<CheckResultInput, 'verifiedPolicy'> {
   });
   if (!projected.ok) throw new Error(projected.reason);
   const trustedBindings = {
+    executionId: '0123456789abcdef0123456789abcdef',
     authorizationBinding: '4'.repeat(64),
     requestIdDigest: '5'.repeat(64),
     requestDigest: '6'.repeat(64),
@@ -139,7 +140,7 @@ function resultInput(): Omit<CheckResultInput, 'verifiedPolicy'> {
   return {
     trustedBindings,
     authorizationBinding: trustedBindings.authorizationBinding,
-    executionId: '0123456789abcdef0123456789abcdef',
+    executionId: trustedBindings.executionId,
     requestIdDigest: trustedBindings.requestIdDigest,
     requestDigest: trustedBindings.requestDigest,
     resultDigest: trustedBindings.resultDigest,

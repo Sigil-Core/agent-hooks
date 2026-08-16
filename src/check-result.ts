@@ -50,6 +50,7 @@ export type ResponseClass =
 export type VerifiedResponsePolicyV1 = VerifiedCompiledResponsePolicyFormat1;
 
 export interface TrustedResultBindings {
+  executionId: string;
   authorizationBinding: string;
   requestIdDigest: string;
   requestDigest: string;
@@ -469,6 +470,8 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
     if (!validPolicy(policy)) return Object.freeze(decision);
     if (
       !isRecord(input.trustedBindings) ||
+      typeof input.trustedBindings.executionId !== 'string' ||
+      !HEX_32.test(input.trustedBindings.executionId) ||
       typeof input.executionId !== 'string' ||
       !HEX_32.test(input.executionId) ||
       typeof input.requestIdDigest !== 'string' ||
@@ -495,6 +498,7 @@ export function checkResult(input: CheckResultInput): ResponseDecisionV1 {
       return Object.freeze(decision);
     }
     if (
+      !sameString(input.executionId, input.trustedBindings.executionId) ||
       !sameString(input.authorizationBinding, input.trustedBindings.authorizationBinding) ||
       !sameString(input.requestIdDigest, input.trustedBindings.requestIdDigest) ||
       !sameString(input.requestDigest, input.trustedBindings.requestDigest) ||

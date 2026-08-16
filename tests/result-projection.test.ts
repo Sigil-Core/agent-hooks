@@ -77,6 +77,7 @@ function input(
   projected: ResultProjectionV1,
 ): CheckResultInput {
   const trustedBindings = {
+    executionId: '0123456789abcdef0123456789abcdef',
     authorizationBinding: digest('authorization'),
     requestIdDigest: digest('request id'),
     requestDigest: digest('request'),
@@ -87,7 +88,7 @@ function input(
     verifiedPolicy: responsePolicy,
     trustedBindings,
     authorizationBinding: trustedBindings.authorizationBinding,
-    executionId: '0123456789abcdef0123456789abcdef',
+    executionId: trustedBindings.executionId,
     requestIdDigest: trustedBindings.requestIdDigest,
     requestDigest: trustedBindings.requestDigest,
     resultDigest: trustedBindings.resultDigest,
@@ -348,6 +349,7 @@ describe('checkResult format 1', () => {
   });
 
   it.each([
+    'executionId',
     'authorizationBinding',
     'requestIdDigest',
     'requestDigest',
