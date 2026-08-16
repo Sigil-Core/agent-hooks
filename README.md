@@ -49,6 +49,14 @@ const decision = await verifyAndCheckResult({
   // compact JWS into this context.
   trustedContext,
   result: {
+    trustedBindings: {
+      authorizationBinding,
+      executionId,
+      requestIdDigest,
+      requestDigest,
+      resultDigest,
+      projectionDigest: projected.projection.digest,
+    },
     authorizationBinding,
     executionId,
     requestIdDigest,

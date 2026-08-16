@@ -221,6 +221,24 @@ describe('MCP CallToolResult projection v1', () => {
     expect(getterCalls).toBe(0);
   });
 
+  it('rejects an isError accessor without invoking it', () => {
+    let getterCalls = 0;
+    const result = { content: [] } as Record<string, unknown>;
+    Object.defineProperty(result, 'isError', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return true;
+      },
+    });
+
+    expect(projectCallToolResult(result)).toEqual({
+      ok: false,
+      reason: 'evaluator_failure',
+    });
+    expect(getterCalls).toBe(0);
+  });
+
   it('caps the complete framed projection at exactly 16 MiB', () => {
     const frameOverhead = 51;
     const atLimit = projectCallToolResult({

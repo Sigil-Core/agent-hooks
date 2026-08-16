@@ -388,9 +388,15 @@ function frameRecords(pending: readonly PendingRecord[]): ResultProjectionV1 | n
 export function projectCallToolResult(result: unknown): ProjectCallToolResult {
   try {
     if (!isRecord(result)) return { ok: false, reason: 'evaluator_failure' };
+    const isErrorDescriptor = Object.getOwnPropertyDescriptor(result, 'isError');
     if (
       !hasOnlyKeys(result, ['content', 'structuredContent', 'isError', '_meta']) ||
-      (Object.hasOwn(result, 'isError') && typeof result.isError !== 'boolean')
+      (isErrorDescriptor !== undefined && (
+        !('value' in isErrorDescriptor) ||
+        isErrorDescriptor.get !== undefined ||
+        isErrorDescriptor.set !== undefined ||
+        typeof isErrorDescriptor.value !== 'boolean'
+      ))
     ) {
       return { ok: false, reason: 'evaluator_failure' };
     }
