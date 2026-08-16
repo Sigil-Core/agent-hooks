@@ -104,9 +104,27 @@ const hasConsistentStringAlias = (
   return snakeValue === undefined || camelValue === undefined || snakeValue === camelValue;
 };
 
+const RESPONSE_POLICY_AUTHORIZATION_FIELDS = [
+  'compiled_response_policy',
+  'compiledResponsePolicy',
+  'compiled_policy_digest',
+  'compiledPolicyDigest',
+  'compiled_policy_envelope_digest',
+  'compiledPolicyEnvelopeDigest',
+] as const;
+
 const hasCompleteResponsePolicyAuthorization = (
   data: Record<string, unknown>,
 ): boolean => {
+  if (
+    RESPONSE_POLICY_AUTHORIZATION_FIELDS.some(
+      (field) =>
+        Object.prototype.hasOwnProperty.call(data, field) &&
+        typeof data[field] !== 'string',
+    )
+  ) {
+    return false;
+  }
   if (
     !hasConsistentStringAlias(
       data,

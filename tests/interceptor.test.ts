@@ -78,6 +78,16 @@ describe('checkIntent', () => {
       compiled_policy_digest: 'b'.repeat(64),
       compiled_policy_envelope_digest: 'c'.repeat(64),
     },
+    {
+      compiled_response_policy: null,
+      compiled_policy_digest: null,
+      compiled_policy_envelope_digest: null,
+    },
+    {
+      compiled_response_policy: 'policy.payload.signature',
+      compiled_policy_digest: null,
+      compiled_policy_envelope_digest: 'c'.repeat(64),
+    },
   ])('fails closed for a partial or malformed response-policy triple: %#', async (fields) => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ status: 'APPROVED', ...fields }), { status: 200 }),
