@@ -9,6 +9,7 @@ import type {
 
 import {
   checkResult,
+  checkResultWithVerifiedPolicy,
   type CheckResultInput,
   type ResponseDecisionReason,
   type ResponseFinding,
@@ -242,6 +243,54 @@ function commonInput(input: CheckResultV2Input): Omit<CheckResultInput, 'verifie
   };
 }
 
+const CHECK_RESULT_V2_INPUT_KEYS = [
+  'verifiedPolicy',
+  'trustedBindings',
+  'authorizationBinding',
+  'executionId',
+  'requestIdDigest',
+  'requestDigest',
+  'resultDigest',
+  'contentType',
+  'idempotencyKey',
+  'tool',
+  'tenantId',
+  'taskId',
+  'policyHash',
+  'projection',
+  'nowUnixSeconds',
+  'scanner',
+] as const;
+
+function readCheckResultV2Input(input: unknown): CheckResultV2Input {
+  if (!isRecord(input)) throw new TypeError('checkResultV2 input must be an object.');
+  const descriptors = Object.getOwnPropertyDescriptors(input);
+  const checked: Record<string, unknown> = {};
+  for (const key of CHECK_RESULT_V2_INPUT_KEYS) {
+    const descriptor = descriptors[key];
+    if (descriptor === undefined) continue;
+    if (!('value' in descriptor) || descriptor.get !== undefined || descriptor.set !== undefined) {
+      throw new TypeError(`Accessor-backed checkResultV2 field: ${key}`);
+    }
+    checked[key] = descriptor.value;
+  }
+  if (checked.scanner !== undefined) {
+    if (!isRecord(checked.scanner)) throw new TypeError('checkResultV2 scanner must be an object.');
+    const scannerDescriptors = Object.getOwnPropertyDescriptors(checked.scanner);
+    const scanner: Record<string, unknown> = {};
+    for (const key of ['transport', 'deadlineMs'] as const) {
+      const descriptor = scannerDescriptors[key];
+      if (descriptor === undefined) continue;
+      if (!('value' in descriptor) || descriptor.get !== undefined || descriptor.set !== undefined) {
+        throw new TypeError(`Accessor-backed checkResultV2 scanner field: ${key}`);
+      }
+      scanner[key] = descriptor.value;
+    }
+    checked.scanner = scanner;
+  }
+  return checked as unknown as CheckResultV2Input;
+}
+
 function deterministicInput(input: CheckResultV2Input): CheckResultInput {
   return {
     ...commonInput(input),
@@ -330,15 +379,14 @@ function makeDecision(
   };
 }
 
-function invalidDecision(input: CheckResultV2Input): ResponseDecisionV2 {
-  const base = checkResult({
-    ...commonInput(input),
-    verifiedPolicy: {} as VerifiedCompiledResponsePolicyFormat1,
-  });
+function invalidDecision(input: unknown): ResponseDecisionV2 {
+  const base = checkResultWithVerifiedPolicy(input, {});
   return {
     ...base,
     schema: 'sof-response-decision/v2',
     formatVersion: 2,
+    disposition: 'BLOCK',
+    reason: 'envelope_invalid',
     findings: [],
     redactions: [],
     redactionPlanDigest: null,
@@ -396,6 +444,7 @@ function validateMappedOffset(
   }
 }
 
+// skipcq: JS-R1005 - Authentication, binding, bounds, and finding validation remain one ordered fail-closed scanner boundary.
 function validateScannerResponse(
   input: CheckResultV2Input,
   request: ScannerRequestV1,
@@ -504,17 +553,20 @@ async function invokeScanner(
  * the explicitly injected operator transport; this package contains no endpoint,
  * credential, network, logging, metric, trace, or hosted-receipt implementation.
  */
+// skipcq: JS-R1005 - Format-2 validation, deterministic precedence, scanner handling, and redaction stay in one auditable decision pipeline.
 export async function checkResultV2(input: CheckResultV2Input): Promise<ResponseDecisionV2> {
+  let checkedInput: CheckResultV2Input;
   let policy: VerifiedCompiledResponsePolicyFormat2;
   try {
-    await validateFormat2Policy(input.verifiedPolicy);
-    policy = input.verifiedPolicy;
+    checkedInput = readCheckResultV2Input(input);
+    await validateFormat2Policy(checkedInput.verifiedPolicy);
+    policy = checkedInput.verifiedPolicy;
   } catch {
     return Object.freeze(invalidDecision(input));
   }
 
-  const now = input.nowUnixSeconds ?? Math.floor(Date.now() / 1000);
-  const base = checkResult(deterministicInput(input));
+  const now = checkedInput.nowUnixSeconds ?? Math.floor(Date.now() / 1000);
+  const base = checkResult(deterministicInput(checkedInput));
   const decision = makeDecision(base, policy, now);
   const observeUntil = policy.policy.observe?.until;
   if (observeUntil !== undefined && Date.parse(observeUntil) / 1000 < now - 30) {
@@ -537,9 +589,9 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
   const scannerPolicy = policy.policy.scanner;
   if (!scannerPolicy) return Object.freeze(decision);
   const required = scannerPolicy.required;
-  const deadlineMs = input.scanner?.deadlineMs ?? policy.bounds.scannerDeadlineMs;
+  const deadlineMs = checkedInput.scanner?.deadlineMs ?? policy.bounds.scannerDeadlineMs;
   if (
-    !input.scanner || !Number.isSafeInteger(deadlineMs) ||
+    !checkedInput.scanner || !Number.isSafeInteger(deadlineMs) ||
     deadlineMs <= 0 || deadlineMs > MAX_DEADLINE_MS
   ) {
     return scannerFailure(decision, 'transport', required);
@@ -547,15 +599,15 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
   if (!PROFILE.test(scannerPolicy.profile) || scannerPolicy.profile.includes('://')) {
     return scannerFailure(decision, 'schema', required);
   }
-  const content = new Uint8Array(input.projection.bytes);
+  const content = new Uint8Array(checkedInput.projection.bytes);
   const request: ScannerRequestV1 = {
     protocolVersion: SCANNER_PROTOCOL_VERSION,
-    executionId: input.executionId,
-    policyHash: input.policyHash,
+    executionId: checkedInput.executionId,
+    policyHash: checkedInput.policyHash,
     profile: scannerPolicy.profile,
-    contentDigest: input.projection.digest,
+    contentDigest: checkedInput.projection.digest,
     contentLength: content.byteLength,
-    contentType: input.projection.contentType,
+    contentType: checkedInput.projection.contentType,
     deadlineMs,
     classes: Object.freeze([...scannerPolicy.classes]),
     content,
@@ -563,7 +615,7 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
 
   let transportResult: ScannerTransportResult;
   try {
-    transportResult = await invokeScanner(input.scanner, request);
+    transportResult = await invokeScanner(checkedInput.scanner, request);
   } catch (error) {
     const reason = error instanceof ScannerValidationError ? error.reason : 'transport';
     return scannerFailure(decision, reason, required);
@@ -577,7 +629,7 @@ export async function checkResultV2(input: CheckResultV2Input): Promise<Response
 
   let response: ParsedScannerResponse;
   try {
-    response = validateScannerResponse(input, request, transportResult.body);
+    response = validateScannerResponse(checkedInput, request, transportResult.body);
   } catch (error) {
     const reason = error instanceof ScannerValidationError ? error.reason : 'schema';
     return scannerFailure(decision, reason, required);

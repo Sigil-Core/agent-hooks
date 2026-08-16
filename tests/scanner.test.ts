@@ -139,6 +139,7 @@ function transport(
   build: (request: ScannerRequestV1) => unknown,
 ): AuthenticatedScannerTransport {
   return {
+    // skipcq: JS-0116 - Scanner transports are Promise-shaped by contract; async preserves the production interface in this test double.
     async scan(request) {
       const body = build(request);
       return {
@@ -280,7 +281,10 @@ describe('Release 2 operator scanner boundary', () => {
   });
 
   it.each([
-    ['authentication', { async scan() { return { authenticated: false as const }; } }],
+    ['authentication', {
+      // skipcq: JS-0116 - Scanner transports are Promise-shaped by contract; async preserves the production interface in this test double.
+      async scan() { return { authenticated: false as const }; },
+    }],
     ['schema', transport((request) => response(request, [], { hostile: true }))],
     ['binding', transport((request) => ({ ...response(request, []), policyHash: '0'.repeat(64) }))],
     ['class', transport((request) => response(request, [{
@@ -313,7 +317,10 @@ describe('Release 2 operator scanner boundary', () => {
         classes: ['pii'],
         minConfidence: 0.85,
       },
-    }), projected, { transport: { async scan() { throw new Error('secret failure'); } } }));
+    }), projected, { transport: {
+      // skipcq: JS-0116 - Scanner transports are Promise-shaped by contract; async preserves rejection behavior in this test double.
+      async scan() { throw new Error('secret failure'); },
+    } }));
     expect(decision).toMatchObject({
       disposition: 'ALLOW',
       scannerEvidence: { status: 'failed', reason: 'transport', required: false },
@@ -394,9 +401,12 @@ describe('Release 2 operator scanner boundary', () => {
 
     const deadline = await checkResultV2(input(required, projected, {
       deadlineMs: 1,
-      transport: { scan: async (_request, { signal }) => new Promise((_resolve, reject) => {
+      transport: {
+        // skipcq: JS-0116 - Scanner transports are Promise-shaped by contract; this callback deliberately returns a pending Promise.
+        scan: async (_request, { signal }) => new Promise((_resolve, reject) => {
         signal.addEventListener('abort', () => reject(new Error('aborted')));
-      }) },
+        }),
+      },
     }));
     expect(deadline.scannerEvidence).toEqual({ status: 'failed', reason: 'deadline', required: true });
 
@@ -426,6 +436,7 @@ describe('Release 2 operator scanner boundary', () => {
       },
     }), projected, {
       transport: {
+        // skipcq: JS-0116 - Scanner transports are Promise-shaped by contract; async preserves the production interface in this test double.
         async scan(request) {
           request.content[0] = (request.content[0] ?? 0) ^ 0xff;
           return {
@@ -446,5 +457,38 @@ describe('Release 2 operator scanner boundary', () => {
     } as unknown as VerifiedCompiledResponsePolicyFormat2;
     const decision = await checkResultV2(input(hostile, projected));
     expect(decision).toMatchObject({ disposition: 'BLOCK', reason: 'envelope_invalid' });
+  });
+
+  it('fails closed without invoking malformed V2 input accessors', async () => {
+    const projected = projection('ordinary output');
+    const validInput = input(policy(), projected);
+    let getterCalls = 0;
+    const accessorPolicy = { ...validInput } as Record<string, unknown>;
+    Object.defineProperty(accessorPolicy, 'verifiedPolicy', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return validInput.verifiedPolicy;
+      },
+    });
+    const accessorNow = { ...validInput } as Record<string, unknown>;
+    Object.defineProperty(accessorNow, 'nowUnixSeconds', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return validInput.nowUnixSeconds;
+      },
+    });
+    const hostileProxy = new Proxy({}, {
+      getOwnPropertyDescriptor: () => {
+        throw new TypeError('hostile proxy');
+      },
+    });
+
+    for (const malformed of [null, hostileProxy, accessorPolicy, accessorNow]) {
+      const decision = await checkResultV2(malformed as unknown as CheckResultV2Input);
+      expect(decision).toMatchObject({ disposition: 'BLOCK', reason: 'envelope_invalid' });
+    }
+    expect(getterCalls).toBe(0);
   });
 });
