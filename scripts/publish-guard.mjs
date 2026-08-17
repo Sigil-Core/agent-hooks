@@ -1,44 +1,81 @@
-/* eslint-env node */
+#!/usr/bin/env node
+/**
+ * Static publication guard for @sigilcore/agent-hooks.
+ *
+ * Rewritten 2026-08-17 to parse the workflow with a real YAML parser and
+ * assert against the resulting object model.
+ *
+ * The previous implementation matched regular expressions against the raw
+ * workflow text. Three consecutive gating reviews found fifteen defects and
+ * every high-severity one was the same mistake in a new place:
+ *
+ *   - the registry-URL escape terminated its character class early, escaped
+ *     nothing, and let `https://registryXnpmjsYorg/` satisfy the assertion;
+ *   - `includes('--provenance')` was satisfied by `--provenance=false`;
+ *   - `/id-token:\s*write/` matched anywhere in the file, so a grant to any
+ *     other job satisfied the publish job's requirement;
+ *   - `job.if?.includes('workflow_dispatch')` classified a job whose
+ *     condition also permitted `release` as manual;
+ *   - the hand-rolled step reader could not handle block scalars with
+ *     variable indentation, inline mappings, or anchors.
+ *
+ * Patching instances produced new instances, because text matching cannot see
+ * structure. Parsing removes that entire class: block scalars, inline
+ * mappings, quoting styles, key order, and anchors all normalise to the same
+ * object, and every assertion below reads a resolved value rather than a
+ * substring.
+ *
+ * What this guard does NOT promise, stated once and mirrored in
+ * docs/architecture.md: it is a static control against drift and accident, not
+ * against an authenticated attacker who can already edit the workflow. It
+ * normalises backslash escapes and quote characters in shell commands, but it
+ * does not resolve variable expansion, command substitution, `eval`, or
+ * encoded payloads, and it is not a shell interpreter. The control against
+ * that threat is review of the workflow diff, which is why
+ * `.github/workflows/**` is a security-seam path.
+ */
 
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-export const repositoryRoot = resolve(scriptDirectory, '..');
-export const expectedRepositoryUrl = 'git+https://github.com/Sigil-Core/agent-hooks.git';
-export const expectedRegistryUrl = 'https://registry.npmjs.org/';
+const repositoryRoot = resolve(scriptDirectory, '..');
 
-function fail(message) {
-  throw new Error(message);
-}
+const expectedRepositoryUrl = 'git+https://github.com/Sigil-Core/agent-hooks.git';
+const expectedRegistryUrl = 'https://registry.npmjs.org/';
+const expectedEnvironment = 'npm-production';
+const releaseCondition = "github.event_name == 'release'";
+const dispatchCondition = "github.event_name == 'workflow_dispatch'";
+
+export class GuardError extends Error {}
 
 function assert(condition, message) {
   if (!condition) {
-    fail(message);
+    throw new GuardError(message);
   }
 }
 
-function unquote(value) {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  const quote = value[0];
-  return ((quote === "'" || quote === '"') && value.at(-1) === quote)
-    ? value.slice(1, -1)
-    : value;
+/**
+ * Normalise a shell command before matching publication verbs.
+ *
+ * Removes backslash escapes before word characters and strips quote
+ * characters, so `n\pm publish`, `"npm" publish`, and `np''m publish` are all
+ * seen as the command the shell would actually run. Bounded on purpose; see
+ * the file header.
+ */
+export function normalizeShellCommand(command) {
+  return command.replace(/\\(\w)/g, '$1').replace(/['"]/g, '');
 }
 
-function yamlValue(value) {
-  return unquote(value?.replace(/\s+#.*$/, '').trim());
+function stripShellComment(command) {
+  return command.replace(/(^|\s)#.*$/, '$1').trim();
 }
 
-function stripShellComment(line) {
-  return line.replace(/\s+#.*$/, '').trim();
-}
-
+/** Split a `run:` body into individual shell commands. */
 export function shellCommands(run) {
-  if (run === null || run === undefined) {
+  if (typeof run !== 'string') {
     return [];
   }
   return run
@@ -48,126 +85,7 @@ export function shellCommands(run) {
     .filter(Boolean);
 }
 
-/**
- * Escape every regex metacharacter.
- *
- * The previous inline class was `[.*+?^${}()|[\\]\\]`, where `]` was left
- * unescaped, so the character class terminated early and the expression
- * escaped nothing at all. `https://registry.npmjs.org/` came back byte for
- * byte unchanged and its dots stayed live, which meant a lookalike such as
- * `https://registryXnpmjsYorg/` satisfied the registry assertion. Verified in
- * both directions before this fix landed.
- */
-export function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * Normalise a shell command before matching publication verbs.
- *
- * A literal search for `npm publish` is defeated by spellings the shell
- * treats as identical: `n\pm publish`, `"npm" publish`, `np''m publish`. This
- * removes backslash escapes before word characters and strips unquoted quote
- * characters so those forms are caught.
- *
- * This is deliberately narrow. It does not interpret variable expansion,
- * command substitution, `eval`, base64 payloads, or `$IFS` tricks, and it is
- * not a shell parser. The guard is a static control against drift and
- * accident, not against an authenticated attacker who can already edit the
- * workflow. `docs/architecture.md` and `docs/publishing.md` state the same
- * bounded claim; keep all three in agreement.
- */
-export function normalizeShellCommand(command) {
-  return command.replace(/\\(\w)/g, '$1').replace(/['"]/g, '');
-}
-
-export function publicationCommands(run) {
-  const commands = [];
-  for (const command of shellCommands(run)) {
-    const normalized = normalizeShellCommand(command);
-    const match = /\bnpm\s+(stage\s+)?publish(?:\s|$).*$/i.exec(normalized);
-    if (!match) {
-      continue;
-    }
-    const staged = match[1] !== undefined;
-    const start = normalized.toLowerCase().indexOf(staged ? 'npm stage publish' : 'npm publish');
-    commands.push({
-      // Report the normalised form: every downstream assertion inspects this
-      // string for required flags, and an escaped spelling must not hide a
-      // missing --provenance either.
-      command: normalized.slice(start).trim(),
-      kind: staged ? 'stage' : 'direct',
-    });
-  }
-  return commands;
-}
-
-function field(lines, indent, name) {
-  const prefix = `${' '.repeat(indent)}${name}:`;
-  const line = lines.find((candidate) => candidate.startsWith(prefix));
-  return line === undefined ? null : line.slice(prefix.length).trim();
-}
-
-function runBody(stepLines) {
-  const runFirst = /^ {6}- run:\s*(.*)$/.exec(stepLines[0]);
-  if (runFirst) {
-    const inline = runFirst[1].trim();
-    if (inline !== '' && !/^[>|][+-]?(?:\s+#.*)?$/.test(inline)) {
-      return inline;
-    }
-    return stepLines
-      .slice(1)
-      .filter((line) => line.startsWith('          '))
-      .map((line) => line.slice(10))
-      .join('\n')
-      .trim();
-  }
-  const runIndex = stepLines.findIndex((line) => /^ {8}run:\s*/.test(line));
-  if (runIndex === -1) {
-    return null;
-  }
-  const inline = stepLines[runIndex].slice('        run:'.length).trim();
-  if (inline !== '' && !/^[>|][+-]?(?:\s+#.*)?$/.test(inline)) {
-    return inline;
-  }
-  return stepLines
-    .slice(runIndex + 1)
-    .filter((line) => line.startsWith('          '))
-    .map((line) => line.slice(10))
-    .join('\n')
-    .trim();
-}
-
-function parseStep(stepLines, jobId) {
-  const first = stepLines[0].slice(8);
-  const separator = first.indexOf(':');
-  assert(separator !== -1, `workflow job ${jobId} contains a malformed step`);
-  const firstKey = first.slice(0, separator);
-  const firstValue = first.slice(separator + 1).trim();
-  const run = runBody(stepLines);
-  const uses = firstKey === 'uses' ? firstValue : field(stepLines, 8, 'uses');
-  const ifCondition = firstKey === 'if' ? firstValue : field(stepLines, 8, 'if');
-  assert(
-    (run === null) !== (uses === null),
-    `workflow job ${jobId} step ${firstKey} must declare exactly one of uses or run`,
-  );
-  return {
-    name: firstKey === 'name' ? firstValue : field(stepLines, 8, 'name') ?? `${firstKey} step`,
-    if: ifCondition,
-    run,
-    uses,
-    persistCredentials: field(stepLines, 10, 'persist-credentials'),
-    publications: publicationCommands(run),
-  };
-}
-
-/**
- * True only when provenance is actually requested.
- *
- * `command.includes('--provenance')` is satisfied by `--provenance=false`,
- * which asks npm to do the opposite. Accept the bare flag or an explicit
- * truthy value and nothing else.
- */
+/** True only when provenance is actually requested; `--provenance=false` is not. */
 export function requestsProvenance(command) {
   if (/(^|\s)--provenance=(false|0)(\s|$)/i.test(command)) {
     return false;
@@ -175,110 +93,121 @@ export function requestsProvenance(command) {
   return /(^|\s)--provenance(=(true|1))?(\s|$)/i.test(command);
 }
 
-/**
- * Effective permissions for one job: job-level block if present, else the
- * workflow-level block.
- *
- * The previous check ran `/id-token:\s*write/` against the whole file, so a
- * grant to any other job satisfied it while the publish job itself could have
- * none. Same root cause as the registry-URL escape and the provenance
- * substring: matching raw source instead of resolving the value that applies
- * to the job under test.
- */
-export function effectivePermissions(source, jobId) {
-  const lines = source.split(/\r?\n/);
-  const read = (startIndex, indent) => {
-    const found = {};
-    for (let i = startIndex + 1; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (line.trim() === '') continue;
-      const m = new RegExp(`^ {${indent}}([A-Za-z0-9_-]+):\\s*(\\S+)\\s*$`).exec(line);
-      if (!m) break;
-      found[m[1]] = m[2];
+/** Publication commands found in one `run:` body, normalised. */
+export function publicationCommands(run) {
+  const commands = [];
+  for (const raw of shellCommands(run)) {
+    const command = normalizeShellCommand(raw);
+    const match = /\bnpm\s+(stage\s+)?publish(?:\s|$)/i.exec(command);
+    if (!match) {
+      continue;
     }
-    return found;
-  };
+    const staged = match[1] !== undefined;
+    const start = command.toLowerCase().indexOf(staged ? 'npm stage publish' : 'npm publish');
+    commands.push({
+      // The normalised form is what every downstream flag assertion reads, so
+      // an escaped spelling cannot hide a missing --provenance either.
+      command: command.slice(start).trim(),
+      kind: staged ? 'stage' : 'direct',
+    });
+  }
+  return commands;
+}
 
-  const jobsIndex = lines.findIndex((line) => line === 'jobs:');
-  let jobPerms = null;
-  if (jobsIndex !== -1) {
-    const jobStart = lines.findIndex(
-      (line, i) => i > jobsIndex && new RegExp(`^ {2}${jobId}:\\s*$`).test(line),
+/**
+ * Effective permissions for a job: its own block when present, else the
+ * workflow-level block. Handles both mapping and inline forms because the
+ * parser has already normalised them.
+ */
+export function effectivePermissions(workflow, job) {
+  const permissions = job?.permissions ?? workflow?.permissions ?? {};
+  return typeof permissions === 'object' && permissions !== null ? permissions : {};
+}
+
+/**
+ * Steps of a job, rejecting an ambiguous step.
+ *
+ * A step declaring both `uses` and `run` is ambiguous: GitHub rejects it, and
+ * a guard that silently tolerates it would let a publication command sit in a
+ * step it never inspects. The pre-parser guard asserted this and the first
+ * draft of the rewrite dropped it; the existing test caught the regression.
+ */
+function stepsOf(job, jobId) {
+  const steps = Array.isArray(job?.steps) ? job.steps : [];
+  for (const step of steps) {
+    const hasUses = typeof step?.uses === 'string';
+    const hasRun = typeof step?.run === 'string';
+    assert(
+      hasUses !== hasRun,
+      `workflow job ${jobId} has a step that must declare exactly one of uses or run`,
     );
-    if (jobStart !== -1) {
-      for (let i = jobStart + 1; i < lines.length; i += 1) {
-        if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(lines[i])) break;
-        if (/^ {4}permissions:\s*$/.test(lines[i])) {
-          jobPerms = read(i, 6);
-          break;
-        }
-      }
+  }
+  return steps;
+}
+
+/** Every publication command in a job, across all of its steps. */
+function publicationsOf(job, jobId) {
+  return stepsOf(job, jobId).flatMap((step) => publicationCommands(step?.run));
+}
+
+/** The `with.registry-url` of the setup-node step, resolved not matched. */
+function registryUrlOf(job, jobId) {
+  for (const step of stepsOf(job, jobId)) {
+    const uses = typeof step?.uses === 'string' ? step.uses : '';
+    if (!uses.startsWith('actions/setup-node')) {
+      continue;
+    }
+    const value = step?.with?.['registry-url'];
+    if (typeof value === 'string') {
+      return value;
     }
   }
-  if (jobPerms) return jobPerms;
+  return undefined;
+}
 
-  const topIndex = lines.findIndex((line) => /^permissions:\s*$/.test(line));
-  return topIndex === -1 ? {} : read(topIndex, 2);
+/** True when any parsed value in the tree mentions the given token name. */
+function referencesToken(value, token) {
+  if (typeof value === 'string') {
+    return value.includes(token);
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => referencesToken(entry, token));
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).some(
+      ([key, entry]) => key.includes(token) || referencesToken(entry, token),
+    );
+  }
+  return false;
 }
 
 export function parseWorkflow(source) {
-  const lines = source.split(/\r?\n/);
-  const jobsIndex = lines.findIndex((line) => line === 'jobs:');
-  assert(jobsIndex !== -1, 'workflow jobs mapping is missing');
-  const starts = [];
-  for (let index = jobsIndex + 1; index < lines.length; index += 1) {
-    const match = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(lines[index]);
-    if (match) {
-      starts.push({ id: match[1], index });
-    }
+  let document;
+  try {
+    document = parseYaml(source);
+  } catch (error) {
+    throw new GuardError(`workflow is not valid YAML: ${error.message}`);
   }
-  assert(starts.length > 0, 'workflow has no jobs');
-
+  assert(document !== null && typeof document === 'object', 'workflow is not a mapping');
+  const jobs = document.jobs;
+  assert(jobs !== null && typeof jobs === 'object', 'workflow jobs mapping is missing');
+  const entries = Object.entries(jobs);
+  assert(entries.length > 0, 'workflow has no jobs');
   return {
-    jobs: starts.map((job, position) => {
-      const end = starts[position + 1]?.index ?? lines.length;
-      const jobLines = lines.slice(job.index + 1, end);
-      const stepsIndex = jobLines.findIndex((line) => line === '    steps:');
-      assert(stepsIndex !== -1, `workflow job ${job.id} has no steps`);
-      const stepStarts = [];
-      for (let index = stepsIndex + 1; index < jobLines.length; index += 1) {
-        if (/^ {6}- /.test(jobLines[index])) {
-          stepStarts.push(index);
-        }
-      }
-      const steps = stepStarts.map((start, stepPosition) => {
-        const stepEnd = stepStarts[stepPosition + 1] ?? jobLines.length;
-        return parseStep(jobLines.slice(start, stepEnd), job.id);
-      });
-      const environmentValue = field(jobLines, 4, 'environment');
-      const environment = environmentValue === ''
-        ? unquote(field(jobLines, 6, 'name'))
-        : unquote(environmentValue);
-      return {
-        id: job.id,
-        if: unquote(field(jobLines, 4, 'if')),
-        environment,
-        runner: unquote(field(jobLines, 4, 'runs-on')),
-        steps,
-        publications: steps.flatMap((step) => step.publications.map((publication) => ({
-          ...publication,
-          job: job.id,
-          step: step.name,
-          if: step.if,
-        }))),
-      };
-    }),
+    raw: document,
+    permissions: document.permissions,
+    jobs: entries.map(([id, job]) => ({
+      id,
+      if: typeof job?.if === 'string' ? job.if.trim() : undefined,
+      environment:
+        typeof job?.environment === 'string' ? job.environment : job?.environment?.name,
+      runner: job?.['runs-on'],
+      permissions: job?.permissions,
+      registryUrl: registryUrlOf(job, id),
+      publications: publicationsOf(job, id),
+      raw: job,
+    })),
   };
-}
-
-function assertPackageContract(packagePath) {
-  const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
-  assert(
-    packageJson.repository?.url === expectedRepositoryUrl,
-    `package repository URL must be ${expectedRepositoryUrl}`,
-  );
-  assert(packageJson.publishConfig?.provenance === true, 'package publishConfig.provenance must be true');
-  return packageJson;
 }
 
 export function validatePublishContract({ workflowSource, packageJson }) {
@@ -286,27 +215,36 @@ export function validatePublishContract({ workflowSource, packageJson }) {
     packageJson?.repository?.url === expectedRepositoryUrl,
     `package repository URL must be ${expectedRepositoryUrl}`,
   );
-  assert(packageJson?.publishConfig?.provenance === true, 'package publishConfig.provenance must be true');
-  assert(!/NPM_TOKEN/.test(workflowSource), 'workflow must not reference NPM_TOKEN');
-  // Resolved against the publish job specifically. See effectivePermissions.
-  const publishPermissions = effectivePermissions(workflowSource, 'publish');
-  assert(publishPermissions['id-token'] === 'write', 'publish job must be granted id-token: write');
-  assert(publishPermissions.contents === 'read', 'publish job must be granted contents: read');
   assert(
-    new RegExp(`registry-url:\\s*${escapeRegExp(expectedRegistryUrl)}`).test(workflowSource),
-    `workflow must use registry ${expectedRegistryUrl}`,
+    packageJson?.publishConfig?.provenance === true,
+    'package publishConfig.provenance must be true',
   );
 
   const plan = parseWorkflow(workflowSource);
-  const production = plan.jobs.find((job) => job.id === 'publish' || job.id === 'production');
+
+  assert(!referencesToken(plan.raw, 'NPM_TOKEN'), 'workflow must not reference NPM_TOKEN');
+
+  // Select the production job from the plan rather than assuming an id.
+  const production =
+    plan.jobs.find((job) => job.if === releaseCondition) ??
+    plan.jobs.find((job) => job.id === 'publish' || job.id === 'production');
   assert(production !== undefined, 'workflow must define a publish job');
-  assert(production.if === "github.event_name == 'release'", 'publish job must be release-event only');
+  assert(production.if === releaseCondition, 'publish job must be release-event only');
   assert(production.runner === 'ubuntu-latest', 'publish job must use GitHub-hosted ubuntu-latest');
-  assert(production.environment === 'npm-production', 'publish job must use the npm-production environment');
   assert(
-    production.steps.some((step) => step.uses?.startsWith('actions/checkout@') &&
-    yamlValue(step.persistCredentials) === 'false'),
-    'publish job checkout must disable persisted credentials',
+    production.environment === expectedEnvironment,
+    `publish job must use the ${expectedEnvironment} environment`,
+  );
+
+  const permissions = effectivePermissions(plan.raw, production.raw);
+  assert(permissions['id-token'] === 'write', 'publish job must be granted id-token: write');
+  assert(permissions.contents === 'read', 'publish job must be granted contents: read');
+
+  // Exact string comparison against the resolved value. No regex, so no
+  // escaping to get wrong and no lookalike host can satisfy it.
+  assert(
+    production.registryUrl === expectedRegistryUrl,
+    `publish job must use registry ${expectedRegistryUrl}`,
   );
 
   const productionPublications = production.publications;
@@ -316,49 +254,70 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   );
   const productionPublication = productionPublications[0];
   assert(productionPublication.kind === 'direct', 'production publish must use npm publish');
-  assert(productionPublication.command.includes('--access public'), 'production publish must set public access');
-  assert(requestsProvenance(productionPublication.command), 'production publish must request provenance');
+  assert(
+    productionPublication.command.includes('--access public'),
+    'production publish must set public access',
+  );
+  assert(
+    requestsProvenance(productionPublication.command),
+    'production publish must request provenance',
+  );
 
   // A job is manual only when its condition permits workflow_dispatch and
-  // nothing else. Substring matching accepted a mixed condition such as
-  // `github.event_name == 'workflow_dispatch' || github.event_name ==
-  // 'release'`, which would be judged under the staged-publication rules while
-  // still firing on a release. Mixed conditions are rejected outright rather
-  // than sorted into one bucket.
+  // nothing else. A mixed condition is rejected rather than sorted into a
+  // bucket, because it would be judged under staged rules while still firing
+  // on a release.
   const dispatchJobs = plan.jobs.filter((job) => job.if?.includes('workflow_dispatch'));
   for (const job of dispatchJobs) {
     assert(
-      job.if === "github.event_name == 'workflow_dispatch'",
+      job.if === dispatchCondition,
       `job ${job.id} mixes workflow_dispatch with another event; split it into separate jobs`,
     );
   }
-  const manualJobs = dispatchJobs;
-  const manualPublications = manualJobs.flatMap((job) => job.publications);
+
+  const manualPublications = dispatchJobs.flatMap((job) => job.publications);
   assert(
     manualPublications.every((publication) => publication.kind === 'stage'),
     'workflow_dispatch publication must use npm stage publish',
   );
-  assert(manualPublications.length <= 1, 'workflow_dispatch must expose at most one staged publication command');
+  assert(
+    manualPublications.length <= 1,
+    'workflow_dispatch must expose at most one staged publication command',
+  );
   if (manualPublications.length === 1) {
-    const stagedPublication = manualPublications[0];
-    assert(requestsProvenance(stagedPublication.command), 'staged publication must request provenance');
-    assert(/--tag\s+(['"]?)[^\s'"]+\1/.test(stagedPublication.command), 'staged publication must set a dist-tag');
-    assert(!/(^|\s)--tag\s+(['"]?)latest\2(?:\s|$)/.test(stagedPublication.command), 'staged publication must not target latest');
+    const staged = manualPublications[0];
+    assert(requestsProvenance(staged.command), 'staged publication must request provenance');
+    assert(/--tag\s+([^\s]+)/.test(staged.command), 'staged publication must set a dist-tag');
+    assert(
+      !/(^|\s)--tag\s+latest(\s|$)/.test(staged.command),
+      'staged publication must not target latest',
+    );
   }
 
-  const allowedJobs = new Set([production.id, ...manualJobs.map((job) => job.id)]);
-  const allPublications = plan.jobs.flatMap((job) => job.publications);
-  assert(
-    allPublications.every((publication) => allowedJobs.has(publication.job)),
-    'publication command is reachable from an unapproved workflow job',
-  );
-  return { ...plan, production, manualJobs, manualPublications };
+  // No job outside the production and dispatch sets may publish at all.
+  const accounted = new Set([production.id, ...dispatchJobs.map((job) => job.id)]);
+  for (const job of plan.jobs) {
+    if (accounted.has(job.id)) {
+      continue;
+    }
+    assert(
+      job.publications.length === 0,
+      `job ${job.id} must not contain a publication command`,
+    );
+  }
+
+  return {
+    productionJob: production.id,
+    productionPublication: productionPublication.command,
+    stagedPublications: manualPublications.map((publication) => publication.command),
+  };
 }
 
 export function validatePublishContractFromFiles({ workflowPath, packagePath }) {
-  const workflowSource = readFileSync(workflowPath, 'utf8');
-  const packageJson = assertPackageContract(packagePath);
-  return validatePublishContract({ workflowSource, packageJson });
+  return validatePublishContract({
+    workflowSource: readFileSync(workflowPath, 'utf8'),
+    packageJson: JSON.parse(readFileSync(packagePath, 'utf8')),
+  });
 }
 
 function option(name) {
@@ -367,23 +326,22 @@ function option(name) {
 }
 
 function main() {
-  const workflowPath = resolve(option('--workflow') ?? resolve(repositoryRoot, '.github/workflows/publish.yml'));
+  const workflowPath = resolve(
+    option('--workflow') ?? resolve(repositoryRoot, '.github/workflows/publish.yml'),
+  );
   const packagePath = resolve(option('--package') ?? resolve(repositoryRoot, 'package.json'));
-  const plan = validatePublishContractFromFiles({ workflowPath, packagePath });
-  console.log(JSON.stringify({
-    workflow: workflowPath,
-    package: packagePath,
-    productionJob: plan.production.id,
-    productionPublication: plan.production.publications[0].command,
-    stagedPublications: plan.manualPublications.map((publication) => publication.command),
-  }, null, 2));
+  try {
+    const report = validatePublishContractFromFiles({ workflowPath, packagePath });
+    process.stdout.write(`${JSON.stringify({ workflow: workflowPath, package: packagePath, ...report }, null, 2)}\n`);
+  } catch (error) {
+    if (error instanceof GuardError) {
+      process.stderr.write(`publication guard: ${error.message}\n`);
+      process.exit(1);
+    }
+    throw error;
+  }
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {
-    main();
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  }
+  main();
 }

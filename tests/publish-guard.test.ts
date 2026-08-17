@@ -112,9 +112,6 @@ describe('npm publication guard', () => {
 
 describe('publication guard hardening', () => {
   it('rejects a lookalike registry URL', () => {
-    // Before the escape fix the metacharacter class terminated early and
-    // escaped nothing, so the dots in registry.npmjs.org stayed live and this
-    // source satisfied the registry assertion.
     const mutated = workflow.replace(
       'https://registry.npmjs.org/',
       'https://registryXnpmjsYorg/',
@@ -124,38 +121,13 @@ describe('publication guard hardening', () => {
     expect(`${result.stderr}${result.stdout}`).toContain('registry');
   });
 
-  it('detects a shell-escaped publication verb', () => {
-    const mutated = workflow.replace(
-      'npm publish --access public --provenance',
-      'n\\pm publish --access public',
-    );
-    const result = runGuard(mutated);
-    // The escaped spelling must still be seen as a publication command, so the
-    // missing --provenance is caught rather than the command going unnoticed.
-    expect(result.status, result.stdout).not.toBe(0);
-    expect(`${result.stderr}${result.stdout}`).toContain('provenance');
-  });
-
-  it('rejects a job mixing workflow_dispatch with release', () => {
-    const mixedJob = [
-      '',
-      '  mixed-publish:',
-      "    if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'",
-      '    runs-on: ubuntu-latest',
-      '    steps:',
-      '      - run: npm stage publish --provenance --tag next',
-      '',
-    ].join('\n');
-    const result = runGuard(`${workflow}${mixedJob}`);
-    expect(result.status, result.stdout).not.toBe(0);
-    expect(`${result.stderr}${result.stdout}`).toContain('workflow_dispatch');
-  });
-});
-
-describe('publication guard resolution', () => {
   it.each([
-    ['quoted', '"npm" publish --access public'],
-    ['split-quoted', "np''m publish --access public"],
+    ['backslash-escaped', 'n\\pm publish --access public'],
+    // Expressed as a YAML single-quoted scalar: shell quoting and YAML
+    // quoting are different layers, and an unquoted `"npm" publish` is not
+    // valid YAML at all.
+    ['shell-quoted', '\'"npm" publish --access public\''],
+    ['split-quoted', '\'np\'\'\'\'m publish --access public\''],
   ])('detects a %s publication verb', (_label, spelling) => {
     const mutated = workflow.replace('npm publish --access public --provenance', spelling);
     const result = runGuard(mutated);
@@ -164,8 +136,6 @@ describe('publication guard resolution', () => {
   });
 
   it('rejects provenance explicitly disabled', () => {
-    // `includes('--provenance')` was satisfied by --provenance=false, which
-    // asks npm for the opposite of what the control requires.
     const mutated = workflow.replace(
       'npm publish --access public --provenance',
       'npm publish --access public --provenance=false',
@@ -175,16 +145,78 @@ describe('publication guard resolution', () => {
     expect(`${result.stderr}${result.stdout}`).toContain('provenance');
   });
 
-  it('rejects id-token granted to some other job but not publish', () => {
-    // The old check matched id-token: write anywhere in the file.
+  it('rejects a job mixing workflow_dispatch with release', () => {
+    const mixed = [
+      '',
+      '  mixed-publish:',
+      "    if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'",
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: npm stage publish --provenance --tag next',
+      '',
+    ].join('\n');
+    const result = runGuard(`${workflow}${mixed}`);
+    expect(result.status, result.stdout).not.toBe(0);
+    expect(`${result.stderr}${result.stdout}`).toContain('workflow_dispatch');
+  });
+
+  it('rejects id-token granted to another job but not to publish', () => {
     const mutated = workflow
-      .replace(/^permissions:\n(  .*\n)+/m, '')
-      .replace(
-        /^  publish:\n/m,
-        '  publish:\n    permissions:\n      contents: read\n',
-      );
+      .replace(/^permissions:\n(?: {2}.*\n)+/m, '')
+      .replace(/^ {2}publish:\n/m, '  publish:\n    permissions:\n      contents: read\n');
     const result = runGuard(mutated);
     expect(result.status, result.stdout).not.toBe(0);
     expect(`${result.stderr}${result.stdout}`).toContain('id-token');
+  });
+
+  it('rejects a publication hidden in an unrelated job', () => {
+    const extra = [
+      '',
+      '  sneaky:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: npm publish --access public --provenance',
+      '',
+    ].join('\n');
+    const result = runGuard(`${workflow}${extra}`);
+    expect(result.status, result.stdout).not.toBe(0);
+    expect(`${result.stderr}${result.stdout}`).toContain('sneaky');
+  });
+});
+
+describe('publication guard parses structure, not text', () => {
+  it('reads a block scalar run body with deeper indentation', () => {
+    // The hand-rolled reader could not follow a block scalar, so a publish
+    // command written this way was invisible to the guard entirely.
+    const mutated = workflow.replace(
+      '        run: npm publish --access public --provenance',
+      ['        run: |', '          npm publish --access public'].join('\n'),
+    );
+    const result = runGuard(mutated);
+    expect(result.status, result.stdout).not.toBe(0);
+    expect(`${result.stderr}${result.stdout}`).toContain('provenance');
+  });
+
+  it('reads inline-mapping permissions', () => {
+    const mutated = workflow.replace(
+      /^permissions:\n(?: {2}.*\n)+/m,
+      'permissions: { contents: read, id-token: write }\n',
+    );
+    const result = runGuard(mutated);
+    expect(result.status, `${result.stderr}${result.stdout}`).toBe(0);
+  });
+
+  it('accepts a quoted registry URL, which regex matching was sensitive to', () => {
+    const mutated = workflow.replace(
+      'registry-url: https://registry.npmjs.org/',
+      "registry-url: 'https://registry.npmjs.org/'",
+    );
+    const result = runGuard(mutated);
+    expect(result.status, `${result.stderr}${result.stdout}`).toBe(0);
+  });
+
+  it('reports invalid YAML rather than silently passing', () => {
+    const result = runGuard('jobs:\n  publish:\n   bad: [unclosed\n');
+    expect(result.status).not.toBe(0);
   });
 });

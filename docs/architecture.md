@@ -47,15 +47,24 @@ non-latest tag. The reusable `scripts/publish-guard.mjs` check rejects direct,
 duplicate, or hidden publication commands and keeps the bootstrap rollback tag
 available for acceptance and rollback.
 
+**The guard parses the workflow; it does not match its text.** It reads the
+YAML into an object model and asserts against resolved values, so block
+scalars, inline mappings, quoting style, and key order all normalise before any
+check runs. This replaced a regex-over-source implementation whose every
+high-severity defect was the same mistake in a new place: an escape that
+escaped nothing and let a lookalike registry host pass, a substring test
+satisfied by `--provenance=false`, and a permission check that matched a grant
+to any job in the file rather than the publish job.
+
 **What the guard does and does not promise.** It is a static control against
 drift and accident, not against an authenticated attacker who can already edit
-the workflow. It normalises backslash escapes and quote characters, so
-`n\pm publish` and `"npm" publish` are caught alongside the literal spelling.
-It does not interpret variable expansion, command substitution, `eval`, encoded
-payloads, or `$IFS` manipulation, and it is not a shell parser. Anyone who can
-merge a workflow change can defeat it; the control that matters against that
-threat is review of the workflow diff, which is why `.github/workflows/**` is a
-security-seam path.
+the workflow. It normalises backslash escapes and quote characters in shell
+commands, so `n\pm publish` and `'"npm" publish'` are caught alongside the
+literal spelling. It does not interpret variable expansion, command
+substitution, `eval`, encoded payloads, or `$IFS` manipulation, and it is not a
+shell interpreter. Anyone who can merge a workflow change can defeat it; the
+control that matters against that threat is review of the workflow diff, which
+is why `.github/workflows/**` is a security-seam path.
 
 The production package has one npm trusted publisher. A temporary P-12 probe
 package needs a separate publisher record restricted to staged publication;
