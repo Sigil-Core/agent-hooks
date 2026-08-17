@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+/* eslint-env node */
 /**
  * Static publication guard for @sigilcore/agent-hooks.
  *
@@ -181,13 +181,16 @@ function referencesToken(value, token) {
   return false;
 }
 
-export function parseWorkflow(source) {
-  let document;
+function parseYamlOrThrow(source) {
   try {
-    document = parseYaml(source);
+    return parseYaml(source);
   } catch (error) {
     throw new GuardError(`workflow is not valid YAML: ${error.message}`);
   }
+}
+
+export function parseWorkflow(source) {
+  const document = parseYamlOrThrow(source);
   assert(document !== null && typeof document === 'object', 'workflow is not a mapping');
   const jobs = document.jobs;
   assert(jobs !== null && typeof jobs === 'object', 'workflow jobs mapping is missing');
@@ -336,7 +339,8 @@ function main() {
   } catch (error) {
     if (error instanceof GuardError) {
       process.stderr.write(`publication guard: ${error.message}\n`);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     throw error;
   }
