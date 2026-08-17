@@ -12,6 +12,9 @@ permissions:
 
 jobs:
   publish:
+    if: github.event_name == 'release'
+    environment:
+      name: npm-production
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -24,6 +27,10 @@ jobs:
           registry-url: https://registry.npmjs.org/
 
       - run: npm install -g npm@11.17.0
+
+      - name: Verify trusted publication contract
+        run: npm run publish:guard
+
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
@@ -48,4 +55,4 @@ jobs:
 
       - name: Publish to npm
         if: steps.published.outputs.already_published != 'true'
-        run: npm publish --access public
+        run: npm publish --access public --provenance

@@ -11,13 +11,23 @@ The workflow must keep these properties aligned:
 - Runner: GitHub-hosted `ubuntu-latest`
 - GitHub permissions: `id-token: write` and `contents: read`
 - Node: `22.14.0` or newer
-- npm CLI: `11.5.1` or newer
+- npm CLI: `11.17.0` (pinned by the workflow)
 - `package.json` repository URL:
   `git+https://github.com/Sigil-Core/agent-hooks.git`
+- GitHub environment: `npm-production`
+- Publish command: `npm publish --access public --provenance`
 
 The workflow does not need an `NPM_TOKEN` repository secret when trusted
 publishing is configured. `gh secret list --repo Sigil-Core/agent-hooks`
-returned no repository secrets on June 22, 2026.
+returned no repository secrets on June 22, 2026. The environment name in the
+workflow is only effective after a protected GitHub `npm-production`
+environment and the matching npm trusted-publisher environment are configured.
+That external rollout prerequisite is intentionally not performed here.
+
+The production acceptance and staged P-12 probe rules are in
+[`docs/publishing.md`](docs/publishing.md). In particular, the probe retains
+its bootstrap rollback tag and permits one `latest` repoint only after exact
+staged approval. It never requires deleting the sole `latest` release.
 
 ## Known failure mode
 
