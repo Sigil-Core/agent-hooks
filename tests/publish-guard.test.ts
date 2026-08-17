@@ -36,11 +36,14 @@ describe('npm publication guard', () => {
     const result = runGuard();
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain('npm publish --access public --provenance');
+    expect(packageJson.repository.url).toBe('git+https://github.com/Sigil-Core/agent-hooks.git');
+    expect(packageJson.publishConfig.provenance).toBe(true);
+  });
+
+  it('documents the publication contract', () => {
     expect(workflow).toContain('name: npm-production');
     expect(workflow).toContain("if: github.event_name == 'release'");
     expect(workflow).not.toContain('NPM_TOKEN');
-    expect(packageJson.repository.url).toBe('git+https://github.com/Sigil-Core/agent-hooks.git');
-    expect(packageJson.publishConfig.provenance).toBe(true);
     expect(publishingDocs).toContain('external configuration');
     expect(publishingDocs).toContain('temporary publisher record');
   });
@@ -103,5 +106,47 @@ describe('npm publication guard', () => {
     `);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('exactly one of uses or run');
+  });
+});
+
+describe('publication guard hardening', () => {
+  it('rejects a lookalike registry URL', () => {
+    // Before the escape fix the metacharacter class terminated early and
+    // escaped nothing, so the dots in registry.npmjs.org stayed live and this
+    // source satisfied the registry assertion.
+    const mutated = workflow.replace(
+      'https://registry.npmjs.org/',
+      'https://registryXnpmjsYorg/',
+    );
+    const result = runGuard(mutated);
+    expect(result.status, result.stdout).not.toBe(0);
+    expect(`${result.stderr}${result.stdout}`).toContain('registry');
+  });
+
+  it('detects a shell-escaped publication verb', () => {
+    const mutated = workflow.replace(
+      'npm publish --access public --provenance',
+      'n\\pm publish --access public',
+    );
+    const result = runGuard(mutated);
+    // The escaped spelling must still be seen as a publication command, so the
+    // missing --provenance is caught rather than the command going unnoticed.
+    expect(result.status, result.stdout).not.toBe(0);
+    expect(`${result.stderr}${result.stdout}`).toContain('provenance');
+  });
+
+  it('rejects a job mixing workflow_dispatch with release', () => {
+    const mixedJob = [
+      '',
+      '  mixed-publish:',
+      "    if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'",
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: npm stage publish --provenance --tag next',
+      '',
+    ].join('\n');
+    const result = runGuard(`${workflow}${mixedJob}`);
+    expect(result.status, result.stdout).not.toBe(0);
+    expect(`${result.stderr}${result.stdout}`).toContain('workflow_dispatch');
   });
 });

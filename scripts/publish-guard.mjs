@@ -48,17 +48,54 @@ export function shellCommands(run) {
     .filter(Boolean);
 }
 
+/**
+ * Escape every regex metacharacter.
+ *
+ * The previous inline class was `[.*+?^${}()|[\\]\\]`, where `]` was left
+ * unescaped, so the character class terminated early and the expression
+ * escaped nothing at all. `https://registry.npmjs.org/` came back byte for
+ * byte unchanged and its dots stayed live, which meant a lookalike such as
+ * `https://registryXnpmjsYorg/` satisfied the registry assertion. Verified in
+ * both directions before this fix landed.
+ */
+export function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Normalise a shell command before matching publication verbs.
+ *
+ * A literal search for `npm publish` is defeated by spellings the shell
+ * treats as identical: `n\pm publish`, `"npm" publish`, `np''m publish`. This
+ * removes backslash escapes before word characters and strips unquoted quote
+ * characters so those forms are caught.
+ *
+ * This is deliberately narrow. It does not interpret variable expansion,
+ * command substitution, `eval`, base64 payloads, or `$IFS` tricks, and it is
+ * not a shell parser. The guard is a static control against drift and
+ * accident, not against an authenticated attacker who can already edit the
+ * workflow. `docs/architecture.md` and `docs/publishing.md` state the same
+ * bounded claim; keep all three in agreement.
+ */
+export function normalizeShellCommand(command) {
+  return command.replace(/\\(\w)/g, '$1').replace(/['"]/g, '');
+}
+
 export function publicationCommands(run) {
   const commands = [];
   for (const command of shellCommands(run)) {
-    const match = /\bnpm\s+(stage\s+)?publish(?:\s|$).*$/i.exec(command);
+    const normalized = normalizeShellCommand(command);
+    const match = /\bnpm\s+(stage\s+)?publish(?:\s|$).*$/i.exec(normalized);
     if (!match) {
       continue;
     }
     const staged = match[1] !== undefined;
-    const start = command.toLowerCase().indexOf(staged ? 'npm stage publish' : 'npm publish');
+    const start = normalized.toLowerCase().indexOf(staged ? 'npm stage publish' : 'npm publish');
     commands.push({
-      command: command.slice(start).trim(),
+      // Report the normalised form: every downstream assertion inspects this
+      // string for required flags, and an escaped spelling must not hide a
+      // missing --provenance either.
+      command: normalized.slice(start).trim(),
       kind: staged ? 'stage' : 'direct',
     });
   }
@@ -194,7 +231,7 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   assert(/id-token:\s*write/.test(workflowSource), 'workflow must grant id-token: write');
   assert(/contents:\s*read/.test(workflowSource), 'workflow must grant contents: read');
   assert(
-    new RegExp(`registry-url:\\s*${expectedRegistryUrl.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}`).test(workflowSource),
+    new RegExp(`registry-url:\\s*${escapeRegExp(expectedRegistryUrl)}`).test(workflowSource),
     `workflow must use registry ${expectedRegistryUrl}`,
   );
 
@@ -220,7 +257,20 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   assert(productionPublication.command.includes('--access public'), 'production publish must set public access');
   assert(productionPublication.command.includes('--provenance'), 'production publish must request provenance');
 
-  const manualJobs = plan.jobs.filter((job) => job.if?.includes('workflow_dispatch'));
+  // A job is manual only when its condition permits workflow_dispatch and
+  // nothing else. Substring matching accepted a mixed condition such as
+  // `github.event_name == 'workflow_dispatch' || github.event_name ==
+  // 'release'`, which would be judged under the staged-publication rules while
+  // still firing on a release. Mixed conditions are rejected outright rather
+  // than sorted into one bucket.
+  const dispatchJobs = plan.jobs.filter((job) => job.if?.includes('workflow_dispatch'));
+  for (const job of dispatchJobs) {
+    assert(
+      job.if === "github.event_name == 'workflow_dispatch'",
+      `job ${job.id} mixes workflow_dispatch with another event; split it into separate jobs`,
+    );
+  }
+  const manualJobs = dispatchJobs;
   const manualPublications = manualJobs.flatMap((job) => job.publications);
   assert(
     manualPublications.every((publication) => publication.kind === 'stage'),

@@ -47,6 +47,16 @@ non-latest tag. The reusable `scripts/publish-guard.mjs` check rejects direct,
 duplicate, or hidden publication commands and keeps the bootstrap rollback tag
 available for acceptance and rollback.
 
+**What the guard does and does not promise.** It is a static control against
+drift and accident, not against an authenticated attacker who can already edit
+the workflow. It normalises backslash escapes and quote characters, so
+`n\pm publish` and `"npm" publish` are caught alongside the literal spelling.
+It does not interpret variable expansion, command substitution, `eval`, encoded
+payloads, or `$IFS` manipulation, and it is not a shell parser. Anyone who can
+merge a workflow change can defeat it; the control that matters against that
+threat is review of the workflow diff, which is why `.github/workflows/**` is a
+security-seam path.
+
 The production package has one npm trusted publisher. A temporary P-12 probe
 package needs a separate publisher record restricted to staged publication;
 its setup is an external rollout prerequisite and is not changed by this

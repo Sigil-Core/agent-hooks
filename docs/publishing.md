@@ -20,7 +20,11 @@ The P-12 probe is a separate, non-production publication path. Its manual job
 may submit exactly one reviewed tarball with `npm stage publish`, a non-latest
 dist-tag, and provenance. A direct `npm publish` is not valid in the probe
 job. The publication guard rejects a second command, a command hidden in a
-different step, or a direct publish hidden behind shell syntax.
+different step, or a direct publish spelled with backslash escapes or quote
+characters. Its shell handling is deliberately bounded: it does not resolve
+variable expansion, command substitution, `eval`, or encoded payloads. See
+`docs/architecture.md` for the full statement of what the guard does and does
+not promise.
 
 The production package has one trusted npm publisher: the release workflow
 for `Sigil-Core/agent-hooks`. A temporary P-12 probe package must use its own
