@@ -7,14 +7,27 @@ URL, and publishes with provenance. It does not use an `NPM_TOKEN` secret.
 The workflow names the `npm-production` GitHub environment. That name is not a
 gate by itself.
 
-Before enabling this workflow, an operator must configure a protected GitHub
-`npm-production` environment and update the npm trusted publisher for this
-package to the exact same environment name. This worktree does not perform
-that external configuration. Until both sides are configured, keep release
-publication fail-closed or in draft: npm will reject an OIDC subject that does
-not match its publisher record.
+Two external controls back that name.
+
+1. **A protected GitHub `npm-production` environment.** Created 2026-08-17 and
+   restricted to protected branches, so only `main` can deploy to it.
+2. **The npm trusted publisher for this package.** npm treats the environment
+   field as optional and validates only the fields it has recorded, so
+   publication keeps working whether or not that field is set. Setting it to
+   `npm-production` is what turns the environment name into an actual
+   restriction rather than a label. Until it is set, the environment is
+   documentation, not a gate.
+
+Publication is release-gated, so neither of these blocks a merge; a mismatch
+surfaces on the next published release, not on the default branch.
 
 ## Staged probe acceptance
+
+**This repository's `publish.yml` contains exactly one job, the release-gated
+production `publish` job. There is no manual staged job here.** The rules below
+describe the contract the guard enforces *if* a staged path is added, and the
+contract the separate P-12 probe package must satisfy in its own workflow. They
+are not a description of a job that exists today.
 
 The P-12 probe is a separate, non-production publication path. Its manual job
 may submit exactly one reviewed tarball with `npm stage publish`, a non-latest

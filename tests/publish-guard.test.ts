@@ -150,3 +150,40 @@ describe('publication guard hardening', () => {
     expect(`${result.stderr}${result.stdout}`).toContain('workflow_dispatch');
   });
 });
+
+describe('publication guard resolution', () => {
+  it.each([
+    ['quoted', '"npm" publish --access public'],
+    ['split-quoted', "np''m publish --access public"],
+  ])('detects a %s publication verb', (_label, spelling) => {
+    const mutated = workflow.replace('npm publish --access public --provenance', spelling);
+    const result = runGuard(mutated);
+    expect(result.status, result.stdout).not.toBe(0);
+    expect(`${result.stderr}${result.stdout}`).toContain('provenance');
+  });
+
+  it('rejects provenance explicitly disabled', () => {
+    // `includes('--provenance')` was satisfied by --provenance=false, which
+    // asks npm for the opposite of what the control requires.
+    const mutated = workflow.replace(
+      'npm publish --access public --provenance',
+      'npm publish --access public --provenance=false',
+    );
+    const result = runGuard(mutated);
+    expect(result.status, result.stdout).not.toBe(0);
+    expect(`${result.stderr}${result.stdout}`).toContain('provenance');
+  });
+
+  it('rejects id-token granted to some other job but not publish', () => {
+    // The old check matched id-token: write anywhere in the file.
+    const mutated = workflow
+      .replace(/^permissions:\n(  .*\n)+/m, '')
+      .replace(
+        /^  publish:\n/m,
+        '  publish:\n    permissions:\n      contents: read\n',
+      );
+    const result = runGuard(mutated);
+    expect(result.status, result.stdout).not.toBe(0);
+    expect(`${result.stderr}${result.stdout}`).toContain('id-token');
+  });
+});

@@ -161,6 +161,66 @@ function parseStep(stepLines, jobId) {
   };
 }
 
+/**
+ * True only when provenance is actually requested.
+ *
+ * `command.includes('--provenance')` is satisfied by `--provenance=false`,
+ * which asks npm to do the opposite. Accept the bare flag or an explicit
+ * truthy value and nothing else.
+ */
+export function requestsProvenance(command) {
+  if (/(^|\s)--provenance=(false|0)(\s|$)/i.test(command)) {
+    return false;
+  }
+  return /(^|\s)--provenance(=(true|1))?(\s|$)/i.test(command);
+}
+
+/**
+ * Effective permissions for one job: job-level block if present, else the
+ * workflow-level block.
+ *
+ * The previous check ran `/id-token:\s*write/` against the whole file, so a
+ * grant to any other job satisfied it while the publish job itself could have
+ * none. Same root cause as the registry-URL escape and the provenance
+ * substring: matching raw source instead of resolving the value that applies
+ * to the job under test.
+ */
+export function effectivePermissions(source, jobId) {
+  const lines = source.split(/\r?\n/);
+  const read = (startIndex, indent) => {
+    const found = {};
+    for (let i = startIndex + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.trim() === '') continue;
+      const m = new RegExp(`^ {${indent}}([A-Za-z0-9_-]+):\\s*(\\S+)\\s*$`).exec(line);
+      if (!m) break;
+      found[m[1]] = m[2];
+    }
+    return found;
+  };
+
+  const jobsIndex = lines.findIndex((line) => line === 'jobs:');
+  let jobPerms = null;
+  if (jobsIndex !== -1) {
+    const jobStart = lines.findIndex(
+      (line, i) => i > jobsIndex && new RegExp(`^ {2}${jobId}:\\s*$`).test(line),
+    );
+    if (jobStart !== -1) {
+      for (let i = jobStart + 1; i < lines.length; i += 1) {
+        if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(lines[i])) break;
+        if (/^ {4}permissions:\s*$/.test(lines[i])) {
+          jobPerms = read(i, 6);
+          break;
+        }
+      }
+    }
+  }
+  if (jobPerms) return jobPerms;
+
+  const topIndex = lines.findIndex((line) => /^permissions:\s*$/.test(line));
+  return topIndex === -1 ? {} : read(topIndex, 2);
+}
+
 export function parseWorkflow(source) {
   const lines = source.split(/\r?\n/);
   const jobsIndex = lines.findIndex((line) => line === 'jobs:');
@@ -228,8 +288,10 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   );
   assert(packageJson?.publishConfig?.provenance === true, 'package publishConfig.provenance must be true');
   assert(!/NPM_TOKEN/.test(workflowSource), 'workflow must not reference NPM_TOKEN');
-  assert(/id-token:\s*write/.test(workflowSource), 'workflow must grant id-token: write');
-  assert(/contents:\s*read/.test(workflowSource), 'workflow must grant contents: read');
+  // Resolved against the publish job specifically. See effectivePermissions.
+  const publishPermissions = effectivePermissions(workflowSource, 'publish');
+  assert(publishPermissions['id-token'] === 'write', 'publish job must be granted id-token: write');
+  assert(publishPermissions.contents === 'read', 'publish job must be granted contents: read');
   assert(
     new RegExp(`registry-url:\\s*${escapeRegExp(expectedRegistryUrl)}`).test(workflowSource),
     `workflow must use registry ${expectedRegistryUrl}`,
@@ -255,7 +317,7 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   const productionPublication = productionPublications[0];
   assert(productionPublication.kind === 'direct', 'production publish must use npm publish');
   assert(productionPublication.command.includes('--access public'), 'production publish must set public access');
-  assert(productionPublication.command.includes('--provenance'), 'production publish must request provenance');
+  assert(requestsProvenance(productionPublication.command), 'production publish must request provenance');
 
   // A job is manual only when its condition permits workflow_dispatch and
   // nothing else. Substring matching accepted a mixed condition such as
@@ -279,7 +341,7 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   assert(manualPublications.length <= 1, 'workflow_dispatch must expose at most one staged publication command');
   if (manualPublications.length === 1) {
     const stagedPublication = manualPublications[0];
-    assert(stagedPublication.command.includes('--provenance'), 'staged publication must request provenance');
+    assert(requestsProvenance(stagedPublication.command), 'staged publication must request provenance');
     assert(/--tag\s+(['"]?)[^\s'"]+\1/.test(stagedPublication.command), 'staged publication must set a dist-tag');
     assert(!/(^|\s)--tag\s+(['"]?)latest\2(?:\s|$)/.test(stagedPublication.command), 'staged publication must not target latest');
   }
