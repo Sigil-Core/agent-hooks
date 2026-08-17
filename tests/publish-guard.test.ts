@@ -44,8 +44,9 @@ describe('npm publication guard', () => {
     expect(workflow).toContain('name: npm-production');
     expect(workflow).toContain("if: github.event_name == 'release'");
     expect(workflow).not.toContain('NPM_TOKEN');
-    expect(publishingDocs).toContain('external configuration');
-    expect(publishingDocs).toContain('temporary publisher record');
+    // Assert the two contract facts the docs must carry, not brittle prose.
+    expect(publishingDocs).toContain('npm trusted publisher');
+    expect(publishingDocs).toContain('npm-production');
   });
 
   it('accepts one manual P-12 stage publish and rejects direct publish', () => {
