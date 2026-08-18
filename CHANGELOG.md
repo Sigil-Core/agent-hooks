@@ -2,6 +2,40 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-08-16
+
+### Added
+
+- Policy 2.3 response controls on the separate async `checkResultV2` API and the
+  explicit `verifyResponsePolicyAuthorizationV2` verifier. Format 1 remains on
+  the Policy 2.2 API; neither verifier reinterprets the other format.
+- `AuthenticatedScannerTransport` injection point. The SDK ships no scanner,
+  endpoint, credentials, certificate handling, model, Python runtime, or network
+  client. The operator adapter receives one private copy of the bounded
+  `sof-rp-projection-v1` bytes and returns authenticated raw JSON bytes.
+- Enforced scanner bounds: 2,000 ms deadline, 1 MiB response limit,
+  duplicate-aware strict JSON parsing, and verification of every execution,
+  policy, profile, content, class, offset, confidence, and evidence-digest
+  binding. Hostile extra fields are rejected.
+- Deterministic disposition precedence: BLOCK over REDACT over ALLOW. Verified
+  redaction spans are merged deterministically and bound to the exact input
+  projection by `redactionPlanDigest`. Observe findings never change disposition.
+
+### Changed
+
+- Compact JWS verification now requires exact Warrant Core `0.4.0`, up from
+  `0.3.0`.
+
+### Security
+
+- Content that already reaches a deterministic block or redaction is never sent
+  to the scanner. A required-scanner failure blocks; an optional-scanner failure
+  records bounded metadata and continues deterministic evaluation. No response
+  bytes or scanner error text enter logs, metrics, traces, hosted Sign, or
+  hosted receipts through this API.
+- Release integrity is enforced at publish time by `npm run publish:guard`,
+  which gates the npm trusted-publishing workflow.
+
 ## [0.8.0] - 2026-08-07
 
 ### Added
