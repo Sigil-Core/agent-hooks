@@ -2,6 +2,8 @@
 
 All notable changes to this project are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [0.8.1] - 2026-08-16
 
 ### Added
@@ -33,8 +35,12 @@ All notable changes to this project are documented here. Format follows [Keep a 
   records bounded metadata and continues deterministic evaluation. No response
   bytes or scanner error text enter logs, metrics, traces, hosted Sign, or
   hosted receipts through this API.
-- Release integrity is enforced at publish time by `npm run publish:guard`,
-  which gates the npm trusted-publishing workflow.
+- `npm run publish:guard` enforces the trusted-publishing workflow
+  configuration: the expected repository and registry URLs, the
+  `npm-production` environment, the release and dispatch event conditions, job
+  permissions, and a mandatory `--provenance` flag on every publish command. It
+  validates how publication is configured, not the contents or integrity of the
+  published artifact.
 
 ## [0.8.0] - 2026-08-07
 
