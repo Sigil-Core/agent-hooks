@@ -250,6 +250,16 @@ export function validatePublishContract({ workflowSource, packageJson }) {
     `publish job must use registry ${expectedRegistryUrl}`,
   );
 
+  const productionSteps = stepsOf(production.raw, production.id);
+  const installIndex = productionSteps.findIndex((step) => step.run?.trim() === 'npm ci');
+  const guardIndex = productionSteps.findIndex(
+    (step) => step.run?.trim() === 'npm run publish:guard',
+  );
+  assert(
+    installIndex !== -1 && guardIndex !== -1 && installIndex < guardIndex,
+    'publish job must run npm ci before npm run publish:guard',
+  );
+
   const productionPublications = production.publications;
   assert(
     productionPublications.length === 1,

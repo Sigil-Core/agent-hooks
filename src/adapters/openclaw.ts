@@ -1,5 +1,6 @@
 // src/adapters/openclaw.ts
 import { checkIntent } from '../interceptor.js';
+import { authorizationPermitsExecution } from '../decision.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig, SigilIntent } from '../types.js';
 import { intentFromToolInput, mapToolAction } from './shared.js';
@@ -58,7 +59,7 @@ export function createOpenclawSigilHandler(config: SigilHookConfig) {
       framework: config.framework ?? 'openclaw',
     });
 
-    if (result.decision === 'APPROVED') return undefined;
+    if (authorizationPermitsExecution(result)) return undefined;
 
     // DENIED and PENDING both become blocks. PENDING is not downgraded to
     // OpenClaw's local requireApproval UI: that would let a host user approve

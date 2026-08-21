@@ -90,4 +90,10 @@ describe('package export surface', () => {
       'application/vnd.modelcontextprotocol.call-tool-result+json',
     );
   });
+
+  it('exports the decision verification boundary', () => {
+    expect(typeof pkg.normalizeDecisionLiteral).toBe('function');
+    expect(typeof pkg.verifyAuthorizationResponse).toBe('function');
+    expect(typeof pkg.authorizationPermitsExecution).toBe('function');
+  });
 });

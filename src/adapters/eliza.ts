@@ -2,6 +2,7 @@
 // Compatible with ElizaOS action execution pattern
 
 import { checkIntent } from '../interceptor.js';
+import { authorizationPermitsExecution } from '../decision.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig, SigilIntent, SigilRejectionContext } from '../types.js';
 import { intentFromToolInput, mapToolAction, objectInput } from './shared.js';
@@ -27,7 +28,7 @@ export async function checkElizaAction(
   );
 
   const result = await checkIntent(intent, config);
-  if (result.decision === 'APPROVED') return null;
+  if (authorizationPermitsExecution(result)) return null;
 
   return {
     blocked: true,

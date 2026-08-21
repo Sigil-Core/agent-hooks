@@ -1,5 +1,12 @@
 // src/interceptor.ts
-import { resolveTaskId, serializeAuthorizeRequestBody } from './request.js';
+import {
+  createTransportFailOpenAuthorization,
+  logDecisionVerification,
+  normalizeDecisionLiteral,
+  verifyAuthorizationResponse,
+  type AuthorizationVerificationContext,
+} from './decision.js';
+import { buildAuthorizeRequestBody, resolveTaskId } from './request.js';
 import { readStrictJson } from './strict-json.js';
 import type { SigilHookConfig, SigilHookResult, SigilIntent } from './types.js';
 import {
@@ -20,6 +27,11 @@ const STRICT_RESPONSE_BODY_DEADLINE_MS = 1500;
 type AuthorizationHttpResult =
   | { data: Record<string, unknown> }
   | { result: SigilHookResult };
+
+interface AuthorizationRequestResult {
+  response: AuthorizationHttpResult;
+  verificationContext: AuthorizationVerificationContext;
+}
 
 const authenticationFailure = (status: number): SigilHookResult => ({
   decision: 'DENIED',
@@ -43,6 +55,7 @@ const OPTIONAL_STRING_FIELDS = [
   'errorCode',
   'intent_attestation',
   'intentAttestation',
+  'decision_record',
   'compiled_response_policy',
   'compiledResponsePolicy',
   'compiled_policy_digest',
@@ -68,8 +81,14 @@ const getHoldId = (data: Record<string, unknown>): string | undefined => {
   return holdId !== undefined && holdId.length > 0 ? holdId : undefined;
 };
 
-const hasValidAuthorizationStatus = (status: unknown): boolean =>
-  status === 'APPROVED' || status === 'DENIED' || status === 'PENDING';
+const hasValidAuthorizationStatus = (status: unknown): boolean => {
+  try {
+    normalizeDecisionLiteral(status);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const hasValidOptionalStringFields = (
   data: Record<string, unknown>,
@@ -81,9 +100,15 @@ const hasValidOptionalStringFields = (
       getString(data[field]) !== undefined,
   );
 
-const throwInvalidAuthorizationResponse = (): never => {
-  throw new Error('sigil_response_invalid_authorization');
-};
+const invalidAuthorizationResponse = (
+  message = 'Authorization response failed schema validation.',
+): AuthorizationHttpResult => ({
+  data: {
+    status: 'DENIED',
+    error_code: SIGIL_RESPONSE_INVALID,
+    message,
+  },
+});
 
 const hasValidPendingHold = (data: Record<string, unknown>): boolean =>
   data['status'] !== 'PENDING' || getHoldId(data) !== undefined;
@@ -155,7 +180,7 @@ const hasCompleteResponsePolicyAuthorization = (
   ];
   const present = fields.filter((value) => value !== undefined);
   return present.length === 0 || (
-    data['status'] === 'APPROVED' &&
+    normalizeDecisionLiteral(data['status']) === 'ALLOWED' &&
     present.length === fields.length &&
     present.every((value) => value !== '')
   );
@@ -166,16 +191,16 @@ const resolveAuthorizationData = (
 ): AuthorizationHttpResult => {
   if (data['status'] === 'DENIED') return { data };
   if (!hasValidAuthorizationStatus(data['status'])) {
-    return throwInvalidAuthorizationResponse();
+    return invalidAuthorizationResponse();
   }
   if (!hasValidOptionalStringFields(data)) {
-    return throwInvalidAuthorizationResponse();
+    return invalidAuthorizationResponse();
   }
   if (!hasValidPendingHold(data)) {
-    return throwInvalidAuthorizationResponse();
+    return invalidAuthorizationResponse();
   }
   if (!hasCompleteResponsePolicyAuthorization(data)) {
-    return throwInvalidAuthorizationResponse();
+    return invalidAuthorizationResponse();
   }
   return { data };
 };
@@ -195,19 +220,25 @@ const resolveHttpResponse = async (
   if (response.status === 401) {
     return { result: authenticationFailure(response.status) };
   }
-  if (response.status >= 500) {
-    throw new Error(`sigil_server_${response.status}`);
+  if (response.status !== 200 && response.status !== 403) {
+    return invalidAuthorizationResponse(
+      `Unexpected authorization response status ${response.status}.`,
+    );
   }
   const data = await parseResponseData(response);
   if (response.status === 403) return resolveForbiddenResponse(data);
-  if (data === undefined) throw new Error('sigil_response_invalid_json');
+  if (data === undefined) {
+    return invalidAuthorizationResponse(
+      'Authorization response was not a valid JSON object.',
+    );
+  }
   return resolveAuthorizationData(data);
 };
 
 // --- strictResponse mode (selected by the Cowork adapter) -------------------
 //
 // The contract is inverted so the unsafe case cannot be reached by omission:
-// only a strictly schema-valid explicit APPROVED may flow through to an
+// only a strictly schema-valid explicit allowed result may flow through to an
 // approval. Every other outcome maps to a deny. The default path below is
 // untouched and remains byte-identical in behavior for every other adapter.
 
@@ -264,11 +295,13 @@ const readStrictResponseBody = async (
   return { bytes: concatChunks(chunks, total) };
 };
 
-const STRICT_APPROVED_KEYS = new Set([
+const STRICT_ALLOWED_KEYS = new Set([
   'status',
+  'message',
   'policy_hash',
   'task_id',
   'intent_attestation',
+  'decision_record',
   'compiled_response_policy',
   'compiled_policy_digest',
   'compiled_policy_envelope_digest',
@@ -280,19 +313,21 @@ const isOptionalStrictString = (
 ): boolean => !(key in data) || typeof data[key] === 'string';
 
 /**
- * The exact accepted APPROVED shape: a JSON object whose `status` is
- * "APPROVED", with optional string `policy_hash` and `task_id` and nothing
- * else. Any unknown field rejects — ignoring unknown fields on the one status
+ * The exact accepted allowed shape: a JSON object whose `status` normalizes
+ * to ALLOWED, with only the explicitly allowlisted typed fields. Any unknown
+ * field rejects — ignoring unknown fields on the one status
  * that means "proceed" is how a future server field silently becomes a bypass.
  * Cross-status fields (`hold_id`, `error_code`, `fail_open`/`failOpen`) are
  * therefore protocol violations here by construction.
  */
-const isStrictValidApproved = (data: Record<string, unknown>): boolean =>
-  data['status'] === 'APPROVED' &&
-  Object.keys(data).every((key) => STRICT_APPROVED_KEYS.has(key)) &&
+const isStrictValidAllowed = (data: Record<string, unknown>): boolean =>
+  normalizeDecisionLiteral(data['status']) === 'ALLOWED' &&
+  Object.keys(data).every((key) => STRICT_ALLOWED_KEYS.has(key)) &&
+  isOptionalStrictString(data, 'message') &&
   isOptionalStrictString(data, 'policy_hash') &&
   isOptionalStrictString(data, 'task_id') &&
   isOptionalStrictString(data, 'intent_attestation') &&
+  isOptionalStrictString(data, 'decision_record') &&
   isOptionalStrictString(data, 'compiled_response_policy') &&
   isOptionalStrictString(data, 'compiled_policy_digest') &&
   isOptionalStrictString(data, 'compiled_policy_envelope_digest') &&
@@ -328,7 +363,9 @@ const strictProtocolDenial = (
 const resolveStrictParsedBody = (
   data: Record<string, unknown>,
 ): AuthorizationHttpResult => {
-  if (data['status'] === 'APPROVED' && isStrictValidApproved(data)) {
+  if (hasValidAuthorizationStatus(data['status']) &&
+      normalizeDecisionLiteral(data['status']) === 'ALLOWED' &&
+      isStrictValidAllowed(data)) {
     return { data };
   }
   if (data['status'] === 'DENIED' && isStrictValidDenied(data)) {
@@ -350,9 +387,6 @@ const resolveStrictHttpResponse = async (
 ): Promise<AuthorizationHttpResult> => {
   if (response.status === 401) {
     return { result: authenticationFailure(401) };
-  }
-  if (response.status >= 500) {
-    throw new Error(`sigil_server_${response.status}`);
   }
   if (response.status === 429) {
     return {
@@ -427,18 +461,59 @@ const handleRequestError = (
     };
   }
   return {
-    decision: 'APPROVED',
+    decision: 'ALLOWED',
+    authorization: createTransportFailOpenAuthorization(),
     failOpen: true,
     message: 'Sigil unreachable — fail open',
   };
 };
 
+const HEX_64 = /^[0-9a-f]{64}$/;
+
+const configurationError = (
+  config: SigilHookConfig,
+): string | undefined => {
+  const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
+  try {
+    const origin = new URL(apiUrl);
+    if (
+      origin.protocol !== 'https:' ||
+      origin.username !== '' ||
+      origin.password !== '' ||
+      apiUrl !== origin.origin
+    ) {
+      return 'apiUrl must be an exact canonical HTTPS origin.';
+    }
+  } catch {
+    return 'apiUrl must be an exact canonical HTTPS origin.';
+  }
+  if (
+    config.decisionVerificationMode === 'enforce' &&
+    (config.expectedPolicyHash === undefined || !HEX_64.test(config.expectedPolicyHash))
+  ) {
+    return 'Enforce mode requires a lowercase SHA-256 expected policy hash.';
+  }
+  return undefined;
+};
+
 const requestAuthorization = async (
   intent: SigilIntent,
   config: SigilHookConfig,
-): Promise<AuthorizationHttpResult> => {
+): Promise<AuthorizationRequestResult> => {
   const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
-  const body = serializeAuthorizeRequestBody(intent, config);
+  const requestBody = buildAuthorizeRequestBody(intent, config);
+  const body = `${JSON.stringify(requestBody, null, 2)}\n`;
+  const verificationContext: AuthorizationVerificationContext = {
+    mode: config.decisionVerificationMode ?? 'warn',
+    signOrigin: apiUrl,
+    expectedPolicyHash: config.expectedPolicyHash,
+    txCommit: getString(requestBody['txCommit']) as string,
+    requestNonce: getString(requestBody['request_nonce']) as string,
+    surface: 'authorize',
+    pinnedJwk: config.decisionRecordJwk,
+    attestationIssuer: config.attestationIssuer,
+    execution: true,
+  };
   const timeoutMs = config.requestTimeoutMs ?? 10_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -452,6 +527,13 @@ const requestAuthorization = async (
     else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
   }
   const strict = config.strictResponse === true;
+  if (
+    verificationContext.mode === 'warn' &&
+    verificationContext.expectedPolicyHash === undefined
+  ) {
+    logDecisionVerification('policy_binding', 'warn', 'authorize');
+  }
+  let response: Response;
   try {
     const requestInit: RequestInit = {
       method: 'POST',
@@ -461,19 +543,37 @@ const requestAuthorization = async (
       },
       body,
       signal: controller.signal,
+      // Bearer-bearing authorization requests never follow redirects. Manual
+      // mode returns the 3xx response to the protocol classifier, where it is
+      // denied without being confused with no-response transport failure.
+      redirect: 'manual',
     };
-    // Under strictResponse, do not auto-follow redirects: a real fetch would
-    // silently follow a 3xx and the strict path would never see it. redirect:
-    // 'error' turns a 3xx into a rejected fetch that lands on the fail-closed
-    // deny path. The default path is left with fetch's normal follow behavior.
-    if (strict) requestInit.redirect = 'error';
-    const response = await fetch(`${apiUrl}/v1/authorize`, requestInit);
-    return strict
-      ? await resolveStrictHttpResponse(response)
-      : await resolveHttpResponse(response);
+    response = await fetch(`${apiUrl}/v1/authorize`, requestInit);
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
-    return { result: handleRequestError(intent, config, error) };
+    clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
+    return {
+      response: { result: handleRequestError(intent, config, error) },
+      verificationContext,
+    };
+  }
+  try {
+    return {
+      response: strict
+        ? await resolveStrictHttpResponse(response)
+        : await resolveHttpResponse(response),
+      verificationContext,
+    };
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    config.onError?.(intent, error);
+    return {
+      response: invalidAuthorizationResponse(
+        `Authorization response processing failed (${error.message}).`,
+      ),
+      verificationContext,
+    };
   } finally {
     clearTimeout(timer);
     externalSignal?.removeEventListener('abort', onExternalAbort);
@@ -487,6 +587,7 @@ const getPolicyHash = (
 
 const approvedResult = (
   data: Record<string, unknown>,
+  authorization: NonNullable<SigilHookResult['authorization']>,
 ): SigilHookResult => {
   const compactJws = getAliasedString(
     data,
@@ -504,7 +605,8 @@ const approvedResult = (
     'compiledPolicyEnvelopeDigest',
   );
   return {
-    decision: 'APPROVED',
+    decision: 'ALLOWED',
+    authorization,
     policyHash: getPolicyHash(data),
     intentAttestation: getAliasedString(
       data,
@@ -575,16 +677,32 @@ const deniedResult = (
   };
 };
 
-const mapAuthorizationData = (
+const mapAuthorizationData = async (
   data: Record<string, unknown>,
   intent: SigilIntent,
   config: SigilHookConfig,
-): SigilHookResult => {
-  if (data['status'] === 'APPROVED') {
-    return approvedResult(data);
+  verificationContext: AuthorizationVerificationContext,
+): Promise<SigilHookResult> => {
+  const verified = await verifyAuthorizationResponse(data, verificationContext);
+  if (verified.reason !== undefined) {
+    logDecisionVerification(verified.reason, verificationContext.mode, verificationContext.surface);
   }
-  if (data['status'] === 'PENDING') {
+  if (verified.decision === 'ALLOWED' && verified.authorization !== undefined) {
+    return approvedResult(data, verified.authorization);
+  }
+  if (verified.decision === 'PENDING') {
     return pendingResult(data, intent, config);
+  }
+  if (
+    hasValidAuthorizationStatus(data['status']) &&
+    normalizeDecisionLiteral(data['status']) === 'ALLOWED'
+  ) {
+    return deniedResult({
+      status: 'DENIED',
+      error_code: 'SIGIL_DECISION_VERIFICATION_FAILED',
+      message: `Authorization response verification failed (${verified.reason ?? 'malformed'}).`,
+      policy_hash: getPolicyHash(data),
+    }, intent, config);
   }
   return deniedResult(data, intent, config);
 };
@@ -593,7 +711,30 @@ export const checkIntent = async (
   intent: SigilIntent,
   config: SigilHookConfig,
 ): Promise<SigilHookResult> => {
-  const response = await requestAuthorization(intent, config);
-  if ('result' in response) return response.result;
-  return mapAuthorizationData(response.data, intent, config);
+  const configError = configurationError(config);
+  if (configError !== undefined) {
+    return deniedResult({
+      status: 'DENIED',
+      error_code: 'SIGIL_DECISION_VERIFICATION_FAILED',
+      message: configError,
+    }, intent, config);
+  }
+  const request = await requestAuthorization(intent, config);
+  if ('result' in request.response) return request.response.result;
+  try {
+    return await mapAuthorizationData(
+      request.response.data,
+      intent,
+      config,
+      request.verificationContext,
+    );
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    config.onError?.(intent, error);
+    return deniedResult({
+      status: 'DENIED',
+      error_code: 'SIGIL_DECISION_VERIFICATION_FAILED',
+      message: `Authorization response verification failed (${error.message}).`,
+    }, intent, config);
+  }
 };

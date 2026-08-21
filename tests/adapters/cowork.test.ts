@@ -847,8 +847,12 @@ describe('createCoworkPreToolUseHook', () => {
 
     const cases: ResponseCase[] = [
       {
-        name: 'schema-valid APPROVED',
-        makeResponse: () => new Response('{"status":"APPROVED"}', { status: 200 }),
+        name: 'schema-valid APPROVED with the producer message field',
+        makeResponse: () =>
+          new Response(
+            '{"status":"APPROVED","message":"Intent verified. Append attestation to transaction calldata."}',
+            { status: 200 },
+          ),
       },
       {
         name: 'malformed JSON',
@@ -869,6 +873,12 @@ describe('createCoworkPreToolUseHook', () => {
         name: 'wrong field type on APPROVED',
         makeResponse: () =>
           new Response('{"status":"APPROVED","policy_hash":42}', { status: 200 }),
+        expectedCode: SIGIL_RESPONSE_INVALID,
+      },
+      {
+        name: 'wrong message type on APPROVED',
+        makeResponse: () =>
+          new Response('{"status":"APPROVED","message":42}', { status: 200 }),
         expectedCode: SIGIL_RESPONSE_INVALID,
       },
       {
@@ -1012,7 +1022,7 @@ describe('createCoworkPreToolUseHook', () => {
       expect(undefinedCount).toBe(1);
     });
 
-    it('maps 401 to SIGIL_AUTH_FAILURE and 500 to SIGIL_UNREACHABLE under forced fail-closed', async () => {
+    it('maps 401 to auth failure and a reached 500 to response invalid', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(new Response('', { status: 401 }));
       const hook = createCoworkPreToolUseHook(BASE_CONFIG);
       expect(
@@ -1022,23 +1032,25 @@ describe('createCoworkPreToolUseHook', () => {
       vi.mocked(fetch).mockResolvedValueOnce(new Response('boom', { status: 500 }));
       expect(
         errorCodeOf(await hook({ tool_name: 'Bash', tool_input: { command: 'ls' } })),
-      ).toBe(SIGIL_UNREACHABLE);
+      ).toBe(SIGIL_RESPONSE_INVALID);
     });
 
-    it("sets redirect: 'error' on the strict fetch so a real 3xx fails closed (MINOR 6)", async () => {
+    it("sets redirect: 'manual' so the strict classifier receives a real 3xx", async () => {
       vi.mocked(fetch).mockResolvedValueOnce(approvedResponse());
       const hook = createCoworkPreToolUseHook(BASE_CONFIG);
       await hook({ tool_name: 'Bash', tool_input: { command: 'ls' } });
       const init = vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit;
-      expect(init.redirect).toBe('error');
+      expect(init.redirect).toBe('manual');
     });
 
-    it('a rejected fetch from redirect:error denies as SIGIL_UNREACHABLE, not a silent follow', async () => {
-      // Emulate what redirect:'error' produces against a real 3xx: fetch rejects.
-      vi.mocked(fetch).mockRejectedValueOnce(new TypeError('unexpected redirect'));
+    it('a reached redirect denies as an invalid response, not as unreachable', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(null, {
+        status: 302,
+        headers: { Location: 'https://attacker.example/authorize' },
+      }));
       const hook = createCoworkPreToolUseHook(BASE_CONFIG);
       const result = await hook({ tool_name: 'Bash', tool_input: { command: 'ls' } });
-      expect(errorCodeOf(result)).toBe(SIGIL_UNREACHABLE);
+      expect(errorCodeOf(result)).toBe(SIGIL_RESPONSE_INVALID);
     });
   });
 
@@ -1055,7 +1067,7 @@ describe('createCoworkPreToolUseHook', () => {
 
       expect(diagnostics).toHaveLength(2);
       const approved = diagnostics[0] as SigilDiagnostic;
-      expect(approved.decision).toBe('APPROVED');
+      expect(approved.decision).toBe('ALLOWED');
       expect(approved.classification).toBe('governed');
       expect(approved.toolName).toBe('Bash');
       expect(typeof approved.latencyMs).toBe('number');

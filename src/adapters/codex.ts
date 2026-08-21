@@ -1,4 +1,5 @@
 import { checkIntent } from '../interceptor.js';
+import { authorizationPermitsExecution } from '../decision.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig } from '../types.js';
 import {
@@ -56,7 +57,7 @@ export function createCodexPreToolUseHook(config: SigilHookConfig) {
       },
     );
 
-    if (result.decision === 'APPROVED') return undefined;
+    if (authorizationPermitsExecution(result)) return undefined;
 
     const rejection = buildRejectionContext(result, intent.action);
     return {

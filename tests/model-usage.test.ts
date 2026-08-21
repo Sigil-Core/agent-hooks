@@ -139,7 +139,7 @@ describe('model usage ledger', () => {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${BASE_CONFIG.apiKey}`,
     });
-    expect(result).toMatchObject({ decision: 'APPROVED', policyHash: 'hash_123' });
+    expect(result).toMatchObject({ decision: 'ALLOWED', policyHash: 'hash_123' });
     expect(body.chainId).toBe(1);
     expect(body.intent).toMatchObject({
       action: 'model.inference',

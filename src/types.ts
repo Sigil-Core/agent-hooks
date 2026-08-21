@@ -1,6 +1,13 @@
 // src/types.ts
 
-export type SigilDecision = 'APPROVED' | 'DENIED' | 'PENDING';
+import type {
+  AuthorizationCapability,
+  DecisionJwk,
+  DecisionVerificationMode,
+  DecisionVerificationReason,
+} from './decision.js';
+
+export type SigilDecision = 'ALLOWED' | 'DENIED' | 'PENDING';
 
 /** HTTP methods accepted by the typed `http` intent profile. */
 export const HTTP_METHODS = [
@@ -95,6 +102,10 @@ export interface SigilDiagnostic {
   latencyMs?: number;
   /** Derived from the response shape: 'ok', 'unreachable', 'http_error', or 'not_attempted'. */
   reachability?: string;
+  verificationReason?: DecisionVerificationReason;
+  verificationMode?: DecisionVerificationMode;
+  verificationSurface?: 'authorize' | 'test_run' | 'hold_resolve';
+  consumerVersion?: string;
 }
 
 export interface SigilIntent {
@@ -127,10 +138,24 @@ export interface SigilHookConfig {
   /**
    * Strict response validation (selected by the Cowork adapter): the body is
    * read under a 64 KiB cap with a read deadline, parsed by the strict JSON
-   * reader, and only a strictly schema-valid explicit APPROVED can approve.
+   * reader, and only a strictly schema-valid allowed capability can approve.
    * Every other outcome denies. Default off; the default path is unchanged.
    */
   strictResponse?: boolean;
+  /**
+   * Decision-record verification mode. Wave 1 defaults to `warn`: missing or
+   * invalid signed material is logged, but an `ALLOWED` response still follows
+   * the legacy execution path with `LegacyUnverifiedAuthorization`. That
+   * rollout capability is compatibility evidence, not proof of verification.
+   * Use `enforce` to require verified, request-bound authorization.
+   */
+  decisionVerificationMode?: DecisionVerificationMode;
+  /** Required policy binding before enforce mode can authorize execution. */
+  expectedPolicyHash?: string;
+  /** Static key pin. When present, network JWKS discovery is not used. */
+  decisionRecordJwk?: DecisionJwk;
+  /** Intent Attestation issuer. Defaults to the current Sign issuer, `sigil-core`. */
+  attestationIssuer?: string;
   /** Propagated into fetch so an aborted caller deadline cancels the socket. */
   signal?: AbortSignal;
   /** Structured audit fields for hook wrappers; never throws outward. */
@@ -148,6 +173,8 @@ export interface SigilHookResult {
   policyHash?: string;
   /** Compact intent attestation returned by Sign for an actual approval. */
   intentAttestation?: string;
+  /** Opaque execution capability. Raw decision bodies never create one directly. */
+  authorization?: AuthorizationCapability;
   /**
    * Atomic Policy 2.2 authorization material returned only for a covered
    * approval. Verify `compactJws` with Warrant Core before calling
@@ -157,7 +184,7 @@ export interface SigilHookResult {
   responsePolicy?: SigilResponsePolicyAuthorization;
   // Resolved task id used for this authorization check.
   taskId?: string;
-  failOpen?: boolean;      // true when APPROVED was returned via fail-open (not real policy evaluation)
+  failOpen?: boolean;      // true when ALLOWED was returned via fail-open (not real policy evaluation)
 }
 
 export interface SigilResponsePolicyAuthorization {

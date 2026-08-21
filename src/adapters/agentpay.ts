@@ -1,4 +1,5 @@
 import { checkIntent } from '../interceptor.js';
+import { authorizationPermitsExecution } from '../decision.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig, SigilHookResult, SigilRejectionContext } from '../types.js';
 
@@ -59,7 +60,7 @@ export async function checkAgentPayTransfer(
     },
   );
 
-  if (result.decision === 'APPROVED') return { approved: true, result };
+  if (authorizationPermitsExecution(result)) return { approved: true, result };
 
   return {
     approved: false,

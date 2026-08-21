@@ -21,7 +21,7 @@ use `projectCallToolResult` and `checkResult` before forwarding the result:
 For a covered approval, `checkIntent` returns `responsePolicy.compactJws`, its
 compiled-payload digest, its envelope digest, and the separate
 `intentAttestation`. The three response-policy fields are atomic: a partial or
-malformed triple fails through the configured fail mode. Verify the compact JWS
+malformed triple is a protocol denial, never a transport fail-open. Verify the compact JWS
 with exact `@sigilcore/warrant-core` `0.4.0` and trusted issuer, key, tenant,
 task, policy-hash, revocation, ruleset, catalog, and clock context before
 passing the resulting verified payload to `checkResult`. The SDK never labels
@@ -259,7 +259,7 @@ const result = await checkIntent(
   { action: 'bash', command: toolCall.args.command, agentId: 'ironclaw-agent' },
   { apiKey: process.env.SIGIL_API_KEY!, framework: 'ironclaw', failMode: 'closed' },
 );
-if (result.decision !== 'APPROVED') {
+if (result.decision !== 'ALLOWED') {
   // Do not dispatch; feed the rejection back to the upstream caller.
   return buildRejectionContext(result, 'bash');
 }
@@ -316,7 +316,7 @@ hold is resolvable only out of band in Sigil Command, never by a local
 approval prompt, and the adapter never emits `ask` or `defer`. Every reachable
 client-side failure — Sign unreachable, 5xx, timeout, egress 403, missing
 credential, malformed input, protocol-invalid response, unclassified tool —
-blocks rather than proceeds. Only a strictly schema-valid explicit `APPROVED`
+blocks rather than proceeds. Only a strictly schema-valid explicit `ALLOWED`
 response can approve.
 
 Governed-tool inventory, rendered from `COWORK_TOOL_MANIFEST` (the single
@@ -479,7 +479,7 @@ recordModelUsage({
 }, config);
 
 const budget = await checkModelBudget(config);
-if (budget.decision !== 'APPROVED') {
+if (budget.decision !== 'ALLOWED') {
   return buildRejectionContext(budget, 'model.inference');
 }
 ```
@@ -536,22 +536,54 @@ For transient unreachability (only surfaces when `failMode: 'closed'`):
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `apiKey` | `string` | Yes | — | Sigil API key (`sk_sigil_...`) |
-| `apiUrl` | `string` | No | `https://sign.sigilcore.com` | Sigil Sign API URL |
+| `apiUrl` | `string` | No | `https://sign.sigilcore.com` | Exact canonical HTTPS origin for Sigil Sign. A trailing slash, paths, credentials, query strings, fragments, and HTTP are rejected before the bearer credential can be sent. |
 | `agentId` | `string` | No | `'agent'` | Identifier for this agent |
 | `framework` | `string` | No | `'agent-hooks'` | Framework identifier — see [`FRAMEWORKS`](./src/framework-registry.ts) |
 | `failMode` | `'open' \| 'closed'` | No | `'open'` | Behavior when Sigil is unreachable — see Fail Modes below |
 | `requestTimeoutMs` | `number` | No | `10000` | Request timeout in milliseconds |
+| `decisionVerificationMode` | `'warn' \| 'enforce'` | No | `'warn'` | Warn preserves legacy `ALLOWED` execution when signed material is missing or invalid; its `LegacyUnverifiedAuthorization` is not proof of verification. Enforce mode requires authorization to be signed and bound. |
+| `expectedPolicyHash` | `string` | Enforce only | — | Required lowercase 64-character SHA-256 policy pin. Enforce mode denies before network access when it is absent or malformed. |
+| `decisionRecordJwk` | `DecisionJwk` | No | — | Static Ed25519 key pin. It takes precedence over JWKS discovery. |
+| `attestationIssuer` | `string` | No | `'sigil-core'` | Expected issuer for Intent Attestations. |
 | `onDenied` | `function` | No | — | Callback when action is denied |
 | `onPending` | `function` | No | — | Callback when action is held |
 | `onError` | `function` | No | — | Callback on network error |
 
+### Signed authorization responses
+
+Every authorize request now carries a fresh `request_nonce`. The SDK accepts
+the deprecated `APPROVED` input alias, normalizes it to `ALLOWED`, and never
+returns the deprecated value. Warn mode keeps unsigned responses working while
+the Sign emitter rolls forward. It also preserves legacy `ALLOWED` execution
+when signed material is present but verification fails. Both paths issue a
+distinct `LegacyUnverifiedAuthorization` capability and log the stable failure
+reason; that legacy capability is rollout compatibility evidence, not proof of
+verification. Enforce mode authorizes only after the decision record and Intent
+Attestation verify and cross-bind to the request nonce, intent hash, and
+configured policy hash.
+When warn mode has no `expectedPolicyHash`, every authorize call emits exactly
+one `policy_binding` diagnostic. The warning is per call so operators can
+measure every execution that lacks a policy pin during rollout.
+
+Adapters branch on the opaque authorization capability. A raw body containing
+`status: "ALLOWED"` cannot authorize execution in enforce mode.
+
 ## Fail Modes
 
-When the Sigil Sign API is unreachable — network partition, DNS failure, connection refused, request timeout, 5xx response, or a non-JSON body — `@sigilcore/agent-hooks` either fails open or fails closed based on `config.failMode`.
+When no HTTP response is received from Sigil Sign, such as a network partition,
+DNS failure, connection refusal, or request timeout, `@sigilcore/agent-hooks`
+applies `config.failMode`.
+
+A reached HTTP response is not transport unreachability. Invalid JSON, schema or
+signature verification, and HTTP statuses including 429 and 5xx deny with a
+non-transport error code in both fail modes.
+Authorize requests use manual redirect handling. A reached 3xx response is
+classified and denied as `SIGIL_RESPONSE_INVALID`; it cannot mint a transport
+fail-open authorization.
 
 ### `failMode: 'open'` (default)
 
-Returns `{ decision: 'APPROVED', failOpen: true, message: 'Sigil unreachable — fail open' }` plus a `warn`-level JSON log line (`event: 'sigil_hook_unreachable'`).
+Returns `{ decision: 'ALLOWED', failOpen: true, message: 'Sigil unreachable — fail open' }` plus a `warn`-level JSON log line (`event: 'sigil_hook_unreachable'`).
 
 **Use when:** development, non-financial workflows, general-purpose agents where a brief Sigil outage should not halt operations.
 
@@ -572,11 +604,14 @@ Returns `{ decision: 'DENIED', errorCode: 'SIGIL_UNREACHABLE', message: <cause> 
 
 ### Distinguishing fail-open from real policy evaluation
 
-In `failMode: 'open'`, an `APPROVED` result sets `failOpen: true` when it came from the fallback path. Real policy evaluations leave `failOpen` unset. Hosts that need to distinguish the two in telemetry should branch on `result.failOpen`.
+In `failMode: 'open'`, an `ALLOWED` result sets `failOpen: true` when it came from the fallback path. Real policy evaluations leave `failOpen` unset. Hosts that need to distinguish the two in telemetry should branch on `result.failOpen`.
 
-### Behavior change from v0.1.0
+### Current reached-response behavior
 
-In v0.1.0, a `5xx` response with a valid-but-empty JSON body surfaced as `DENIED` + `SIGIL_POLICY_VIOLATION` (misleading — it was a server failure, not a policy decision). In v0.2.0, `5xx` routes through the same unreachability path as network errors: `APPROVED + failOpen: true` in open mode, `DENIED + SIGIL_UNREACHABLE` in closed.
+Older releases routed some reached 5xx responses through the unreachability
+fallback. Current releases reserve `SIGIL_UNREACHABLE` and `failOpen` for
+requests that receive no HTTP response. A reached 5xx response denies as
+`SIGIL_RESPONSE_INVALID`.
 
 ## Documentation
 
