@@ -536,12 +536,12 @@ For transient unreachability (only surfaces when `failMode: 'closed'`):
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `apiKey` | `string` | Yes | — | Sigil API key (`sk_sigil_...`) |
-| `apiUrl` | `string` | No | `https://sign.sigilcore.com` | Exact canonical HTTPS origin for Sigil Sign. Paths, credentials, query strings, fragments, and HTTP are rejected before the bearer credential can be sent. |
+| `apiUrl` | `string` | No | `https://sign.sigilcore.com` | Exact canonical HTTPS origin for Sigil Sign. A trailing slash, paths, credentials, query strings, fragments, and HTTP are rejected before the bearer credential can be sent. |
 | `agentId` | `string` | No | `'agent'` | Identifier for this agent |
 | `framework` | `string` | No | `'agent-hooks'` | Framework identifier — see [`FRAMEWORKS`](./src/framework-registry.ts) |
 | `failMode` | `'open' \| 'closed'` | No | `'open'` | Behavior when Sigil is unreachable — see Fail Modes below |
 | `requestTimeoutMs` | `number` | No | `10000` | Request timeout in milliseconds |
-| `decisionVerificationMode` | `'warn' \| 'enforce'` | No | `'warn'` | Warn preserves legacy unsigned responses. Enforce mode requires authorization to be signed and bound. |
+| `decisionVerificationMode` | `'warn' \| 'enforce'` | No | `'warn'` | Warn preserves legacy `ALLOWED` execution when signed material is missing or invalid; its `LegacyUnverifiedAuthorization` is not proof of verification. Enforce mode requires authorization to be signed and bound. |
 | `expectedPolicyHash` | `string` | Enforce only | — | Required lowercase 64-character SHA-256 policy pin. Enforce mode denies before network access when it is absent or malformed. |
 | `decisionRecordJwk` | `DecisionJwk` | No | — | Static Ed25519 key pin. It takes precedence over JWKS discovery. |
 | `attestationIssuer` | `string` | No | `'sigil-core'` | Expected issuer for Intent Attestations. |
@@ -554,10 +554,13 @@ For transient unreachability (only surfaces when `failMode: 'closed'`):
 Every authorize request now carries a fresh `request_nonce`. The SDK accepts
 the deprecated `APPROVED` input alias, normalizes it to `ALLOWED`, and never
 returns the deprecated value. Warn mode keeps unsigned responses working while
-the Sign emitter rolls forward, but marks them with a distinct
-`LegacyUnverifiedAuthorization` capability and logs `record_missing`. Enforce
-mode authorizes only after the decision record and Intent Attestation verify
-and cross-bind to the request nonce, intent hash, and configured policy hash.
+the Sign emitter rolls forward. It also preserves legacy `ALLOWED` execution
+when signed material is present but verification fails. Both paths issue a
+distinct `LegacyUnverifiedAuthorization` capability and log the stable failure
+reason; that legacy capability is rollout compatibility evidence, not proof of
+verification. Enforce mode authorizes only after the decision record and Intent
+Attestation verify and cross-bind to the request nonce, intent hash, and
+configured policy hash.
 When warn mode has no `expectedPolicyHash`, every authorize call emits exactly
 one `policy_binding` diagnostic. The warning is per call so operators can
 measure every execution that lacks a policy pin during rollout.

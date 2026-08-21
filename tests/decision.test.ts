@@ -250,18 +250,21 @@ describe('verifyAuthorizationResponse', () => {
       context('enforce', { pinnedJwk: undefined }),
     );
     expect(result).toEqual({ decision: 'DENIED', reason: 'key_unavailable' });
-    // One 40 KiB chunk is below the 64 KiB limit and the second crosses it, so
-    // exactly two proves both that the reader reached the limit and did not
-    // request any excess data after crossing it.
+    // This is a behavior-level oracle over the deterministic mock source, not
+    // a reader-internals assertion: one 40 KiB pull is below the 64 KiB limit
+    // and the second crosses it, so exactly two proves both the lower bound and
+    // that no excess pull occurred after overflow.
     expect(chunksSent).toBe(2);
     expect(cancelled).toBe(true);
   });
 
   it('bounds JWKS discovery with an AbortSignal timeout', async () => {
     let suppliedSignal: AbortSignal | null | undefined;
-    vi.spyOn(globalThis, 'fetch').mockImplementationOnce(async (_input, init) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementationOnce((_input, init) => {
       suppliedSignal = init?.signal;
-      return new Response(JSON.stringify({ keys: [fixture.publicJwk] }), { status: 200 });
+      return Promise.resolve(
+        new Response(JSON.stringify({ keys: [fixture.publicJwk] }), { status: 200 }),
+      );
     });
     const vector = fixture.vectors.find((item) => item.id === 'valid_allowed') as FixtureVector;
     const result = await verifyAuthorizationResponse(
@@ -328,6 +331,7 @@ describe('verifyAuthorizationResponse', () => {
           ).toString('base64url');
           return `${duplicateHeader}.${payload}.${signature}`;
         }
+        default: throw new Error(`Unhandled malformed JOSE mutation: ${String(mutation)}`);
       }
     })();
     body['decision_record'] = mutated;
@@ -375,15 +379,15 @@ describe('verifyAuthorizationResponse', () => {
   });
 
   it('fails safely when the Node process global is unavailable', () => {
-    vi.stubGlobal('process', undefined);
+    vi.stubGlobal('process', undefined); // skipcq: JS-W1042 - This test requires the global to be explicitly absent.
     expect(() => clearDecisionKeyCacheForTests()).toThrow('Decision key cache reset is test-only');
   });
 
   it('honors the 300 second JWKS cache TTL', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2033-05-18T03:33:20Z'));
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(JSON.stringify({ keys: [fixture.publicJwk] }), { status: 200 }));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ keys: [fixture.publicJwk] }), { status: 200 })));
     const vector = fixture.vectors.find((item) => item.id === 'valid_allowed') as FixtureVector;
     const unpinned = context('enforce', { pinnedJwk: undefined });
     expect((await verifyAuthorizationResponse(bodyFor(vector), unpinned)).authorization?.kind).toBe('verified');

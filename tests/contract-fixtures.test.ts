@@ -22,11 +22,18 @@ const FIXTURE_REQUEST_NONCE = '00000000-0000-4000-8000-000000000000';
 
 function normalizeRequestNonce(body: string): string {
   const parsed = JSON.parse(body) as Record<string, unknown>;
-  expect(parsed['request_nonce']).toMatch(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  const requestNonce = parsed['request_nonce'];
+  const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  expect(requestNonce).toMatch(uuidV4);
+
+  const requestNonceLine = /^(\s*"request_nonce":\s*")([0-9a-f-]+)("\s*,?\s*)$/m;
+  const rawMatch = requestNonceLine.exec(body);
+  expect(rawMatch?.[2]).toBe(requestNonce);
+  return body.replace(
+    requestNonceLine,
+    (_line, prefix: string, _nonce: string, suffix: string) =>
+      `${prefix}${FIXTURE_REQUEST_NONCE}${suffix}`,
   );
-  parsed['request_nonce'] = FIXTURE_REQUEST_NONCE;
-  return `${JSON.stringify(parsed, null, 2)}\n`;
 }
 
 function readFixture(name: string): string {
@@ -37,12 +44,14 @@ async function captureWire(
   run: (apiUrl: string) => Promise<unknown>,
 ): Promise<string> {
   let capturedBody = '';
-  vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+  vi.stubGlobal('fetch', vi.fn((_input: string | URL | Request, init?: RequestInit) => {
     capturedBody = String(init?.body ?? '');
-    return new Response('{"status":"APPROVED"}', {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return Promise.resolve(
+      new Response('{"status":"APPROVED"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
   }));
   await run('https://sign.test.sigilcore.com');
   return capturedBody;
@@ -98,6 +107,21 @@ afterEach(() => {
 });
 
 describe('contract fixtures', () => {
+  it('normalizes only the nonce bytes in the captured wire body', () => {
+    const captured = [
+      '{',
+      '  "unchanged": { "spacing": true },',
+      '  "request_nonce": "12345678-1234-4abc-8def-123456789abc",',
+      '  "tail": "preserved"',
+      '}',
+      '',
+    ].join('\n');
+
+    expect(normalizeRequestNonce(captured)).toBe(
+      captured.replace('12345678-1234-4abc-8def-123456789abc', FIXTURE_REQUEST_NONCE),
+    );
+  });
+
   it('fixture hashes match SHA256SUMS', () => {
     const lines = readFixture('SHA256SUMS')
       .trim()

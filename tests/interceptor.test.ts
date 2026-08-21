@@ -106,10 +106,10 @@ describe('checkIntent', () => {
   });
 
   it('logs one missing policy-binding diagnostic on every warn-mode call', async () => {
-    vi.mocked(fetch).mockImplementation(async () => new Response(
+    vi.mocked(fetch).mockImplementation(() => Promise.resolve(new Response(
       JSON.stringify({ status: 'ALLOWED' }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
-    ));
+    )));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     await checkIntent({ action: 'bash', command: 'first' }, BASE_CONFIG);
@@ -175,6 +175,23 @@ describe('checkIntent', () => {
       {
         ...BASE_CONFIG,
         apiUrl: 'http://sign.test.sigilcore.com',
+        decisionVerificationMode: 'warn',
+      },
+    );
+
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_DECISION_VERIFICATION_FAILED',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a trailing slash on the exact canonical Sign origin', async () => {
+    const result = await checkIntent(
+      { action: 'bash', command: 'ls -la' },
+      {
+        ...BASE_CONFIG,
+        apiUrl: 'https://sign.test.sigilcore.com/',
         decisionVerificationMode: 'warn',
       },
     );

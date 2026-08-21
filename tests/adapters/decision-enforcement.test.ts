@@ -45,7 +45,7 @@ beforeEach(() => {
 });
 
 const respondUnsigned = (status: typeof UNSIGNED_STATUSES[number]): void => {
-  vi.mocked(fetch).mockImplementation(async () => forgedBody(status));
+  vi.mocked(fetch).mockImplementation(() => Promise.resolve(forgedBody(status)));
 };
 
 describe('adapter authorization seams reject unsigned canonical bodies in enforce mode', () => {
@@ -100,7 +100,7 @@ describe('adapter authorization seams reject unsigned canonical bodies in enforc
 
   it.each(UNSIGNED_STATUSES)('blocks the LangChain seam for unsigned %s', async (status) => {
     respondUnsigned(status);
-    const call = vi.fn(async () => 'executed');
+    const call = vi.fn(() => Promise.resolve('executed'));
     const tool = wrapLangChainTool({ name: 'Bash', call }, CONFIG);
     const result = await tool.call('{"command":"echo test"}');
     expectVerificationDeny(result);

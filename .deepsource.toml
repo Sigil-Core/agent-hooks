@@ -9,6 +9,10 @@ exclude_patterns = [
   "**/dist/**",
   "**/build/**",
   "**/coverage/**",
+  "**/tests/capability.compile.ts",
+  "**/tests/crypto-lint-fixtures/**",
+  "**/tests/lint-fixtures/**",
+  "**/tests/mutant-fixtures/**",
 ]
 
 [[analyzers]]

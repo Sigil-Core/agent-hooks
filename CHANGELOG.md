@@ -32,6 +32,9 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - Bearer-bearing authorize requests use manual redirect handling so reached 3xx
   responses deny as protocol input instead of being misclassified as transport
   failure.
+- Warn mode preserves legacy `ALLOWED` execution when signed material is missing
+  or invalid, emits a stable verification diagnostic, and returns a
+  `LegacyUnverifiedAuthorization` that is not proof of verification.
 
 ### Security
 

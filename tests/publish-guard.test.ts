@@ -55,6 +55,7 @@ describe('npm publication guard', () => {
         '      - run: npm ci',
       ].join('\n'),
     );
+    expect(reversed).not.toBe(workflow);
     const decoyJob = [
       '',
       '  decoy:',

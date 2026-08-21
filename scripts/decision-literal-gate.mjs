@@ -54,7 +54,7 @@ const loadGate = () => {
   const files = [];
   for (const runtimePath of config.runtimePaths) {
     const absolute = resolve(root, runtimePath);
-    let stats;
+    let stats = null;
     try {
       stats = statSync(absolute);
     } catch {
@@ -80,19 +80,21 @@ const loadGate = () => {
   return violations;
 };
 
-let violations;
-try {
-  violations = loadGate();
-} catch (error) {
-  const message = error instanceof Error ? error.message : 'unknown configuration fault';
-  console.error(`decision-literal-gate: configuration error: ${message}`);
-  process.exit(CONFIGURATION_ERROR_EXIT);
-}
+const main = () => {
+  try {
+    const violations = loadGate();
+    if (violations.length === 0) {
+      console.log('decision-literal-gate: 0 violations');
+      return 0;
+    }
+    console.error(`decision-literal-gate: ${violations.length} violation(s)`);
+    for (const violation of violations) console.error(violation);
+    return blocking ? 1 : 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown configuration fault';
+    console.error(`decision-literal-gate: configuration error: ${message}`);
+    return CONFIGURATION_ERROR_EXIT;
+  }
+};
 
-if (violations.length === 0) {
-  console.log('decision-literal-gate: 0 violations');
-  process.exit(0);
-}
-console.error(`decision-literal-gate: ${violations.length} violation(s)`);
-for (const violation of violations) console.error(violation);
-process.exit(blocking ? 1 : 0);
+process.exitCode = main();

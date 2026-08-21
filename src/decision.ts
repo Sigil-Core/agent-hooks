@@ -1,3 +1,4 @@
+// skipcq: JS-0234 - Raw key construction and signature verification are confined to this verifier boundary.
 import {
   createHash,
   createPublicKey,
@@ -146,9 +147,9 @@ const verifiedAuthorization = (
 });
 
 function sameString(left: string, right: string): boolean {
-  const a = Buffer.from(left, 'utf8');
-  const b = Buffer.from(right, 'utf8');
-  return a.length === b.length && timingSafeEqual(a, b);
+  const leftBytes = Buffer.from(left, 'utf8');
+  const rightBytes = Buffer.from(right, 'utf8');
+  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
 }
 
 function strictObject(bytes: Uint8Array): Record<string, unknown> {
@@ -204,6 +205,29 @@ function exactHeader(
   return header['kid'];
 }
 
+function hasUsableKeyOperations(keyOperations: unknown): boolean {
+  return keyOperations === undefined || (
+    Array.isArray(keyOperations) &&
+    keyOperations.every((operation) => typeof operation === 'string') &&
+    keyOperations.includes('verify')
+  );
+}
+
+function isUsableDecisionJwk(jwk: DecisionJwk): boolean {
+  const encodedPublicKey = typeof jwk.x === 'string' ? jwk.x : '';
+  const decodedPublicKey = BASE64URL.test(encodedPublicKey)
+    ? Buffer.from(encodedPublicKey, 'base64url')
+    : undefined;
+  return jwk.kty === 'OKP' &&
+    jwk.crv === 'Ed25519' &&
+    decodedPublicKey !== undefined &&
+    decodedPublicKey.byteLength === 32 &&
+    decodedPublicKey.toString('base64url') === encodedPublicKey &&
+    (jwk.use === undefined || jwk.use === 'sig') &&
+    (jwk.alg === undefined || jwk.alg === 'EdDSA') &&
+    hasUsableKeyOperations(jwk.key_ops);
+}
+
 function readJwks(input: unknown): Map<string, DecisionJwk> {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new VerificationFailure('key_unavailable');
@@ -220,23 +244,7 @@ function readJwks(input: unknown): Map<string, DecisionJwk> {
     if (typeof jwk.kid !== 'string' || jwk.kid.length === 0) continue;
     if (seenKids.has(jwk.kid)) throw new VerificationFailure('key_unavailable');
     seenKids.add(jwk.kid);
-    const x = typeof jwk.x === 'string' ? jwk.x : '';
-    const decodedX = BASE64URL.test(x) ? Buffer.from(x, 'base64url') : undefined;
-    if (
-      jwk.kty !== 'OKP' ||
-      jwk.crv !== 'Ed25519' ||
-      decodedX === undefined ||
-      decodedX.byteLength !== 32 ||
-      decodedX.toString('base64url') !== x ||
-      (jwk.use !== undefined && jwk.use !== 'sig') ||
-      (jwk.alg !== undefined && jwk.alg !== 'EdDSA') ||
-      (jwk.key_ops !== undefined &&
-        (!Array.isArray(jwk.key_ops) ||
-          jwk.key_ops.some((operation) => typeof operation !== 'string') ||
-          !jwk.key_ops.includes('verify')))
-    ) {
-      continue;
-    }
+    if (!isUsableDecisionJwk(jwk)) continue;
     selected.set(jwk.kid, jwk);
   }
   if (selected.size === 0) throw new VerificationFailure('key_unavailable');

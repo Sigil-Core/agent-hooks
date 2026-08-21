@@ -142,7 +142,13 @@ export interface SigilHookConfig {
    * Every other outcome denies. Default off; the default path is unchanged.
    */
   strictResponse?: boolean;
-  /** Decision-record verification mode. Wave 1 defaults to `warn`. */
+  /**
+   * Decision-record verification mode. Wave 1 defaults to `warn`: missing or
+   * invalid signed material is logged, but an `ALLOWED` response still follows
+   * the legacy execution path with `LegacyUnverifiedAuthorization`. That
+   * rollout capability is compatibility evidence, not proof of verification.
+   * Use `enforce` to require verified, request-bound authorization.
+   */
   decisionVerificationMode?: DecisionVerificationMode;
   /** Required policy binding before enforce mode can authorize execution. */
   expectedPolicyHash?: string;
