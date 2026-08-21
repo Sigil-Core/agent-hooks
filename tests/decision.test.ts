@@ -280,9 +280,14 @@ describe('verifyAuthorizationResponse', () => {
     vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
     vi.spyOn(globalThis, 'fetch').mockImplementationOnce(async (_input, init) =>
       await new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => {
+        const fail = (): void => {
           reject(new DOMException('The operation was aborted', 'AbortError'));
-        }, { once: true });
+        };
+        if (init?.signal?.aborted === true) {
+          fail();
+          return;
+        }
+        init?.signal?.addEventListener('abort', fail, { once: true });
       }));
     const vector = fixture.vectors.find((item) => item.id === 'valid_allowed') as FixtureVector;
     const pending = verifyAuthorizationResponse(

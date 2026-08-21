@@ -122,6 +122,13 @@ describe('contract fixtures', () => {
     );
   });
 
+  it.each([
+    ['missing', '{\n  "unchanged": true\n}\n'],
+    ['malformed', '{\n  "request_nonce": "not-a-uuid"\n}\n'],
+  ])('rejects a %s request_nonce in a captured wire body', (_case, captured) => {
+    expect(() => normalizeRequestNonce(captured)).toThrow();
+  });
+
   it('fixture hashes match SHA256SUMS', () => {
     const lines = readFixture('SHA256SUMS')
       .trim()

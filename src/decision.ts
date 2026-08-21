@@ -1,4 +1,3 @@
-// skipcq: JS-0234 - Raw key construction and signature verification are confined to this verifier boundary.
 import {
   createHash,
   createPublicKey,
@@ -351,6 +350,9 @@ async function resolveJwk(
   let keys = await fetchJwks(origin, false);
   let selected = keys.get(kid);
   if (selected === undefined) {
+    // Revision 3 intentionally permits one forced refresh per kid miss. It
+    // deleted per-origin cooldown and single-flight machinery until a consumer
+    // has real concurrency that justifies rebuilding those controls.
     keys = await fetchJwks(origin, true);
     selected = keys.get(kid);
   }
@@ -479,6 +481,8 @@ function warnFallback(
   decision: SigilDecision,
   reason: DecisionVerificationReason,
 ): AuthorizationVerificationResult {
+  // Verification degradation is not transport unreachability. This legacy
+  // rollout capability must never carry the transport-only fail-open brand.
   return {
     decision,
     ...(decision === 'ALLOWED' ? { authorization: legacyAuthorization() } : {}),

@@ -153,11 +153,24 @@ describe('decision gate negative controls', () => {
       for (const [fixture, finding, expectedFindings] of fixtures) {
         const result = spawnSync(
           resolve(process.cwd(), 'node_modules/.bin/eslint'),
-          [resolve(process.cwd(), 'tests', fixtureDirectory, fixture)],
+          [
+            resolve(process.cwd(), 'tests', fixtureDirectory, fixture),
+            '--format',
+            'json',
+          ],
           childProcessOptions,
         );
         expect(result.status).toBe(1);
-        expect(result.stdout.split(finding).length - 1).toBe(expectedFindings);
+        const report = JSON.parse(result.stdout) as Array<{
+          messages: Array<{ ruleId: string | null; message: string }>;
+        }>;
+        const matchingFindings = report
+          .flatMap((file) => file.messages)
+          .filter((message) =>
+            message.ruleId === 'no-restricted-syntax' && message.message.includes(finding));
+        // Exact counts prove every planted bypass syntax is blocked in both the
+        // global and adapter-specific overrides; "at least one" could miss a selector.
+        expect(matchingFindings).toHaveLength(expectedFindings);
       }
     },
   );
