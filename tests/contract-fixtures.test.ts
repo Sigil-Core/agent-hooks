@@ -44,7 +44,11 @@ async function captureWire(
   run: (apiUrl: string) => Promise<unknown>,
 ): Promise<string> {
   let capturedBody = '';
-  vi.stubGlobal('fetch', vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+  let capturedTarget = '';
+  let capturedMethod = '';
+  vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+    capturedTarget = String(input);
+    capturedMethod = init?.method ?? '';
     capturedBody = String(init?.body ?? '');
     return Promise.resolve(
       new Response('{"status":"APPROVED"}', {
@@ -54,6 +58,8 @@ async function captureWire(
     );
   }));
   await run('https://sign.test.sigilcore.com');
+  expect(capturedTarget).toBe('https://sign.test.sigilcore.com/v1/authorize');
+  expect(capturedMethod).toBe('POST');
   return capturedBody;
 }
 

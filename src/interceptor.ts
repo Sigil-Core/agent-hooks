@@ -297,6 +297,7 @@ const readStrictResponseBody = async (
 
 const STRICT_ALLOWED_KEYS = new Set([
   'status',
+  'message',
   'policy_hash',
   'task_id',
   'intent_attestation',
@@ -313,8 +314,8 @@ const isOptionalStrictString = (
 
 /**
  * The exact accepted allowed shape: a JSON object whose `status` normalizes
- * to ALLOWED, with optional string `policy_hash` and `task_id` and nothing
- * else. Any unknown field rejects — ignoring unknown fields on the one status
+ * to ALLOWED, with only the explicitly allowlisted typed fields. Any unknown
+ * field rejects — ignoring unknown fields on the one status
  * that means "proceed" is how a future server field silently becomes a bypass.
  * Cross-status fields (`hold_id`, `error_code`, `fail_open`/`failOpen`) are
  * therefore protocol violations here by construction.
@@ -322,6 +323,7 @@ const isOptionalStrictString = (
 const isStrictValidAllowed = (data: Record<string, unknown>): boolean =>
   normalizeDecisionLiteral(data['status']) === 'ALLOWED' &&
   Object.keys(data).every((key) => STRICT_ALLOWED_KEYS.has(key)) &&
+  isOptionalStrictString(data, 'message') &&
   isOptionalStrictString(data, 'policy_hash') &&
   isOptionalStrictString(data, 'task_id') &&
   isOptionalStrictString(data, 'intent_attestation') &&

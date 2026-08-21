@@ -847,8 +847,12 @@ describe('createCoworkPreToolUseHook', () => {
 
     const cases: ResponseCase[] = [
       {
-        name: 'schema-valid APPROVED',
-        makeResponse: () => new Response('{"status":"APPROVED"}', { status: 200 }),
+        name: 'schema-valid APPROVED with the producer message field',
+        makeResponse: () =>
+          new Response(
+            '{"status":"APPROVED","message":"Intent verified. Append attestation to transaction calldata."}',
+            { status: 200 },
+          ),
       },
       {
         name: 'malformed JSON',
@@ -869,6 +873,12 @@ describe('createCoworkPreToolUseHook', () => {
         name: 'wrong field type on APPROVED',
         makeResponse: () =>
           new Response('{"status":"APPROVED","policy_hash":42}', { status: 200 }),
+        expectedCode: SIGIL_RESPONSE_INVALID,
+      },
+      {
+        name: 'wrong message type on APPROVED',
+        makeResponse: () =>
+          new Response('{"status":"APPROVED","message":42}', { status: 200 }),
         expectedCode: SIGIL_RESPONSE_INVALID,
       },
       {

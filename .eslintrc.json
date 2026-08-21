@@ -29,12 +29,12 @@
             "paths": [
               {
                 "name": "node:crypto",
-                "importNames": ["createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
+                "importNames": ["default", "createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
                 "message": "Raw signature verification is confined to src/decision.ts."
               },
               {
                 "name": "crypto",
-                "importNames": ["createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
+                "importNames": ["default", "createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
                 "message": "Raw signature verification is confined to src/decision.ts."
               },
               {
@@ -48,6 +48,14 @@
               {
                 "name": "jws",
                 "message": "Raw JOSE handling is confined to src/decision.ts."
+              },
+              {
+                "name": "node:module",
+                "message": "Runtime module loaders are forbidden outside src/decision.ts."
+              },
+              {
+                "name": "module",
+                "message": "Runtime module loaders are forbidden outside src/decision.ts."
               }
             ]
           }
@@ -61,6 +69,10 @@
           {
             "selector": "ImportDeclaration[source.value='crypto'] > ImportNamespaceSpecifier",
             "message": "Namespace crypto imports can bypass the verifier-boundary import list."
+          },
+          {
+            "selector": "TSImportEqualsDeclaration[moduleReference.expression.value=/^(node:crypto|crypto)$/]",
+            "message": "TypeScript crypto imports are forbidden outside src/decision.ts."
           },
           {
             "selector": "ImportExpression[source.value='node:crypto']",
@@ -95,20 +107,48 @@
             "message": "Computed require calls are forbidden outside src/decision.ts."
           },
           {
+            "selector": "VariableDeclarator[init.name='require']",
+            "message": "Aliasing require is forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "AssignmentExpression[right.name='require']",
+            "message": "Aliasing require is forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[object.name='require']",
+            "message": "Binding or otherwise accessing require members is forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[property.name='require']",
+            "message": "Member require calls are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[computed=true][property.value='require']",
+            "message": "Member require calls are forbidden outside src/decision.ts."
+          },
+          {
             "selector": "MemberExpression[property.name='verify']",
-            "message": "Web Crypto signature verification is confined to src/decision.ts."
+            "message": "Web Crypto signature verification boundary conservatively forbids every verify member access outside src/decision.ts."
           },
           {
             "selector": "MemberExpression[computed=true][property.value='verify']",
-            "message": "Web Crypto signature verification is confined to src/decision.ts."
+            "message": "Web Crypto signature verification boundary conservatively forbids every verify member access outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[computed=true][property.type!='Literal'][object.name='subtle']",
+            "message": "Web Crypto signature verification boundary conservatively forbids computed subtle member access outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[computed=true][property.type!='Literal'][object.property.name='subtle']",
+            "message": "Web Crypto signature verification boundary conservatively forbids computed subtle member access outside src/decision.ts."
           },
           {
             "selector": "ObjectPattern > Property[key.name='verify']",
-            "message": "Web Crypto signature verification is confined to src/decision.ts."
+            "message": "Web Crypto signature verification boundary conservatively forbids every destructured verify property outside src/decision.ts."
           },
           {
             "selector": "ObjectPattern > Property[computed=true][key.value='verify']",
-            "message": "Web Crypto signature verification is confined to src/decision.ts."
+            "message": "Web Crypto signature verification boundary conservatively forbids every destructured verify property outside src/decision.ts."
           }
         ]
       }
@@ -151,12 +191,12 @@
               },
               {
                 "name": "node:crypto",
-                "importNames": ["createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
+                "importNames": ["default", "createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
                 "message": "Raw signature verification is confined to src/decision.ts."
               },
               {
                 "name": "crypto",
-                "importNames": ["createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
+                "importNames": ["default", "createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
                 "message": "Raw signature verification is confined to src/decision.ts."
               },
               {
@@ -170,6 +210,28 @@
               {
                 "name": "jws",
                 "message": "Raw JOSE handling is confined to src/decision.ts."
+              },
+              {
+                "name": "node:module",
+                "message": "Runtime module loaders are forbidden outside src/decision.ts."
+              },
+              {
+                "name": "module",
+                "message": "Runtime module loaders are forbidden outside src/decision.ts."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["**/decision.js"],
+                "importNames": [
+                  "normalizeDecisionLiteral",
+                  "verifyAuthorizationResponse",
+                  "createTransportFailOpenAuthorization",
+                  "VerifiedAuthorization",
+                  "LegacyUnverifiedAuthorization",
+                  "AuthorizationCapability"
+                ],
+                "message": "Execution paths cannot import raw decision parsing or verification primitives."
               }
             ]
           }
@@ -183,6 +245,10 @@
           {
             "selector": "ImportDeclaration[source.value='crypto'] > ImportNamespaceSpecifier",
             "message": "Namespace crypto imports can bypass the verifier-boundary import list."
+          },
+          {
+            "selector": "TSImportEqualsDeclaration[moduleReference.expression.value=/^(node:crypto|crypto)$/]",
+            "message": "TypeScript crypto imports are forbidden outside src/decision.ts."
           },
           {
             "selector": "ImportExpression[source.value=/decision\\.js$/]",
@@ -221,24 +287,52 @@
             "message": "Computed require calls are forbidden in execution paths."
           },
           {
+            "selector": "VariableDeclarator[init.name='require']",
+            "message": "Aliasing require is forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "AssignmentExpression[right.name='require']",
+            "message": "Aliasing require is forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[object.name='require']",
+            "message": "Binding or otherwise accessing require members is forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[property.name='require']",
+            "message": "Member require calls are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[computed=true][property.value='require']",
+            "message": "Member require calls are forbidden outside src/decision.ts."
+          },
+          {
             "selector": "MemberExpression[property.name='verify']",
-            "message": "Web Crypto signature verification is confined to src/decision.ts."
+            "message": "Web Crypto signature verification boundary conservatively forbids every verify member access outside src/decision.ts."
           },
           {
             "selector": "MemberExpression[computed=true][property.value='verify']",
-            "message": "Web Crypto signature verification is confined to src/decision.ts."
+            "message": "Web Crypto signature verification boundary conservatively forbids every verify member access outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[computed=true][property.type!='Literal'][object.name='subtle']",
+            "message": "Web Crypto signature verification boundary conservatively forbids computed subtle member access outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[computed=true][property.type!='Literal'][object.property.name='subtle']",
+            "message": "Web Crypto signature verification boundary conservatively forbids computed subtle member access outside src/decision.ts."
           },
           {
             "selector": "ObjectPattern > Property[key.name='verify']",
-            "message": "Web Crypto signature verification is confined to src/decision.ts."
+            "message": "Web Crypto signature verification boundary conservatively forbids every destructured verify property outside src/decision.ts."
           },
           {
             "selector": "ObjectPattern > Property[computed=true][key.value='verify']",
-            "message": "Web Crypto signature verification is confined to src/decision.ts."
+            "message": "Web Crypto signature verification boundary conservatively forbids every destructured verify property outside src/decision.ts."
           },
           {
             "selector": "TSImportType",
-            "message": "Execution paths cannot reference authorization capabilities through import types."
+            "message": "Execution paths cannot reference or alias authorization capabilities through import types."
           },
           {
             "selector": "ImportDeclaration[source.value=/decision\\.js$/] > ImportNamespaceSpecifier",
