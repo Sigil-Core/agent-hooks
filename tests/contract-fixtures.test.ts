@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCoworkPreToolUseHook } from '../src/adapters/cowork.js';
@@ -20,6 +18,17 @@ const BASE_CONFIG: SigilHookConfig = {
   taskId: 'fixture-task-1',
 };
 
+const FIXTURE_REQUEST_NONCE = '00000000-0000-4000-8000-000000000000';
+
+function normalizeRequestNonce(body: string): string {
+  const parsed = JSON.parse(body) as Record<string, unknown>;
+  expect(parsed['request_nonce']).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  parsed['request_nonce'] = FIXTURE_REQUEST_NONCE;
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
 function readFixture(name: string): string {
   return readFileSync(resolve(FIXTURE_ROOT, name), 'utf8');
 }
@@ -27,39 +36,16 @@ function readFixture(name: string): string {
 async function captureWire(
   run: (apiUrl: string) => Promise<unknown>,
 ): Promise<string> {
-  return await new Promise<string>((resolvePromise, rejectPromise) => {
-    let capturedBody = '';
-    const server = createServer((req, res) => {
-      req.setEncoding('utf8');
-      req.on('data', (chunk) => {
-        capturedBody += chunk;
-      });
-      req.on('end', () => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end('{"status":"APPROVED"}');
-        server.close((closeErr) => {
-          if (closeErr) {
-            rejectPromise(closeErr);
-            return;
-          }
-          resolvePromise(capturedBody);
-        });
-      });
-      req.on('error', (error) => {
-        server.close(() => rejectPromise(error));
-      });
+  let capturedBody = '';
+  vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = String(init?.body ?? '');
+    return new Response('{"status":"APPROVED"}', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
     });
-
-    server.on('error', rejectPromise);
-    server.listen(0, '127.0.0.1', async () => {
-      const { port } = server.address() as AddressInfo;
-      try {
-        await run(`http://127.0.0.1:${port}`);
-      } catch (error) {
-        server.close(() => rejectPromise(error));
-      }
-    });
-  });
+  }));
+  await run('https://sign.test.sigilcore.com');
+  return capturedBody;
 }
 
 async function captureWireBody(
@@ -108,6 +94,7 @@ async function captureCoworkWireBody(): Promise<string> {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe('contract fixtures', () => {
@@ -136,7 +123,7 @@ describe('contract fixtures', () => {
       BASE_CONFIG,
     );
 
-    expect(actual).toBe(readFixture('bash.json'));
+    expect(normalizeRequestNonce(actual)).toBe(readFixture('bash.json'));
   });
 
   it('web_fetch fixture matches the actual HTTP wire body', async () => {
@@ -149,7 +136,7 @@ describe('contract fixtures', () => {
       BASE_CONFIG,
     );
 
-    expect(actual).toBe(readFixture('web_fetch.json'));
+    expect(normalizeRequestNonce(actual)).toBe(readFixture('web_fetch.json'));
   });
 
   it('wallet.transfer fixture matches the actual HTTP wire body', async () => {
@@ -164,7 +151,7 @@ describe('contract fixtures', () => {
       BASE_CONFIG,
     );
 
-    expect(actual).toBe(readFixture('wallet.transfer.json'));
+    expect(normalizeRequestNonce(actual)).toBe(readFixture('wallet.transfer.json'));
   });
 
   it('intent agentId and generated txCommit match the pinned wire fixture', async () => {
@@ -183,12 +170,12 @@ describe('contract fixtures', () => {
       },
     );
 
-    expect(actual).toBe(readFixture('intent_agent_override.json'));
+    expect(normalizeRequestNonce(actual)).toBe(readFixture('intent_agent_override.json'));
   });
 
   it('cowork_pretooluse fixture matches the actual HTTP wire body', async () => {
     const actual = await captureCoworkWireBody();
-    expect(actual).toBe(readFixture('cowork_pretooluse.json'));
+    expect(normalizeRequestNonce(actual)).toBe(readFixture('cowork_pretooluse.json'));
   });
 
   it('pins fixtures to a real agent-hooks-rs commit sha', () => {

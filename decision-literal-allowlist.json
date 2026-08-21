@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "runtimePaths": ["src"],
+  "allowedFiles": [
+    {
+      "path": "src/decision.ts",
+      "reason": "Canonical vocabulary, permanent input alias, verifier, and opaque capability implementation."
+    },
+    {
+      "path": "src/types.ts",
+      "reason": "Canonical public decision union and result contracts."
+    },
+    {
+      "path": "src/interceptor.ts",
+      "reason": "The single HTTP parse boundary maps verified wire responses into canonical results."
+    }
+  ]
+}

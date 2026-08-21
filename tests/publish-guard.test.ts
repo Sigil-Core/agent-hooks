@@ -40,6 +40,36 @@ describe('npm publication guard', () => {
     expect(packageJson.publishConfig.provenance).toBe(true);
   });
 
+  it('rejects guard-before-install even when another job has the correct order', () => {
+    const reversed = workflow.replace(
+      [
+        '      - run: npm ci',
+        '',
+        '      - name: Verify trusted publication contract',
+        '        run: npm run publish:guard',
+      ].join('\n'),
+      [
+        '      - name: Verify trusted publication contract',
+        '        run: npm run publish:guard',
+        '',
+        '      - run: npm ci',
+      ].join('\n'),
+    );
+    const decoyJob = [
+      '',
+      '  decoy:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: npm ci',
+      '      - run: npm run publish:guard',
+      '',
+    ].join('\n');
+    const result = runGuard(`${reversed}${decoyJob}`);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('publish job must run npm ci before npm run publish:guard');
+  });
+
   it('documents the publication contract', () => {
     expect(workflow).toContain('name: npm-production');
     expect(workflow).toContain("if: github.event_name == 'release'");

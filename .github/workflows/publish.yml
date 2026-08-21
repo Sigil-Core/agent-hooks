@@ -28,10 +28,11 @@ jobs:
 
       - run: npm install -g npm@11.17.0
 
+      - run: npm ci
+
       - name: Verify trusted publication contract
         run: npm run publish:guard
 
-      - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test

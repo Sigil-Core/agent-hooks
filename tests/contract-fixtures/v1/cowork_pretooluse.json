@@ -2,6 +2,7 @@
   "framework": "cowork",
   "agentId": "fixture-agent",
   "txCommit": "92bf7e19f70272c73f4d1e27740fbeaf44e3f83adec54bae1e6c41b406fbca2e",
+  "request_nonce": "00000000-0000-4000-8000-000000000000",
   "intent": {
     "action": "bash",
     "arguments": {

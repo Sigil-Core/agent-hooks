@@ -30,7 +30,7 @@ describe('default response path is unchanged by the strictResponse addition', ()
       new Response('{"status":"APPROVED","extra":"field","failOpen":true}', { status: 200 }),
     );
     const result = await checkIntent({ action: 'bash', command: 'ls' }, OPEN_CONFIG);
-    expect(result.decision).toBe('APPROVED');
+    expect(result.decision).toBe('ALLOWED');
   });
 
   it('camelCase policyHash is still read on the default path', async () => {
@@ -38,13 +38,17 @@ describe('default response path is unchanged by the strictResponse addition', ()
       new Response('{"status":"APPROVED","policyHash":"abc"}', { status: 200 }),
     );
     const result = await checkIntent({ action: 'bash', command: 'ls' }, OPEN_CONFIG);
-    expect(result).toMatchObject({ decision: 'APPROVED', policyHash: 'abc' });
+    expect(result).toMatchObject({ decision: 'ALLOWED', policyHash: 'abc' });
   });
 
-  it('malformed JSON still fails open under the default failMode', async () => {
+  it('malformed JSON denies without treating the reached response as unreachable', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response('not json', { status: 200 }));
     const result = await checkIntent({ action: 'bash', command: 'ls' }, OPEN_CONFIG);
-    expect(result).toMatchObject({ decision: 'APPROVED', failOpen: true });
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_RESPONSE_INVALID',
+    });
+    expect(result.failOpen).toBeUndefined();
   });
 
   it('PENDING with camelCase holdId is still honored on the default path', async () => {
@@ -66,12 +70,12 @@ describe('default response path is unchanged by the strictResponse addition', ()
     });
   });
 
-  it('429 still routes through the invalid-status throw and the failMode branch', async () => {
+  it('429 denies as a reached invalid response regardless of failMode', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response('{"retry":"later"}', { status: 429 }),
     );
     const open = await checkIntent({ action: 'bash', command: 'ls' }, OPEN_CONFIG);
-    expect(open).toMatchObject({ decision: 'APPROVED', failOpen: true });
+    expect(open).toMatchObject({ decision: 'DENIED', errorCode: 'SIGIL_RESPONSE_INVALID' });
 
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response('{"retry":"later"}', { status: 429 }),
@@ -80,14 +84,14 @@ describe('default response path is unchanged by the strictResponse addition', ()
       { action: 'bash', command: 'ls' },
       { ...OPEN_CONFIG, failMode: 'closed' },
     );
-    expect(closed).toMatchObject({ decision: 'DENIED', errorCode: 'SIGIL_UNREACHABLE' });
+    expect(closed).toMatchObject({ decision: 'DENIED', errorCode: 'SIGIL_RESPONSE_INVALID' });
   });
 
-  it('the Codex adapter (fail-closed default) still denies malformed 200 bodies as unreachable', async () => {
+  it('the Codex adapter denies malformed 200 bodies as invalid responses', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response('not json', { status: 200 }));
     const hook = createCodexPreToolUseHook(OPEN_CONFIG);
     const result = await hook({ tool_name: 'Bash', tool_input: { command: 'ls' } });
-    expect(result?.hookSpecificOutput.permissionDecisionReason).toContain('SIGIL_UNREACHABLE');
+    expect(result?.hookSpecificOutput.permissionDecisionReason).toContain('SIGIL_RESPONSE_INVALID');
   });
 
   it('the wire body for a default-path adapter carries no arguments field', async () => {

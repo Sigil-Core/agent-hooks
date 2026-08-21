@@ -18,6 +18,7 @@ export function resolveTaskId(intent: SigilIntent, config: SigilHookConfig): str
 export function buildAuthorizeRequestBody(
   intent: SigilIntent,
   config: SigilHookConfig,
+  requestNonce: string = randomUUID(),
 ): Record<string, unknown> {
   const agentId = intent.agentId ?? config.agentId ?? 'agent';
   const txCommit = intent.txCommit ?? generateIntentCommit(intent);
@@ -30,6 +31,7 @@ export function buildAuthorizeRequestBody(
     framework: config.framework ?? 'agent-hooks',
     agentId,
     txCommit,
+    request_nonce: requestNonce,
     chainId: intent.chainId,
     intent: {
       action: intent.action,

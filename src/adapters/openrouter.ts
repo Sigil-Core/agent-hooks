@@ -1,5 +1,6 @@
 import { buildRejectionContext } from '../rejection.js';
 import { checkIntent } from '../interceptor.js';
+import { authorizationPermitsExecution } from '../decision.js';
 import { checkModelBudget, recordModelUsage } from '../model-usage.js';
 import type { SigilHookConfig, SigilHookResult, SigilRejectionContext } from '../types.js';
 import { intentFromToolInput, mapToolAction, objectInput, valueAsString } from './shared.js';
@@ -73,7 +74,7 @@ export function createOpenRouterToolGate(
       },
     );
 
-    if (result.decision === 'APPROVED') {
+    if (authorizationPermitsExecution(result)) {
       return { approved: true, name, args, result };
     }
 

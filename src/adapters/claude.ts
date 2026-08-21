@@ -2,6 +2,7 @@
 // Compatible with @anthropic-ai/sdk tool_use block format
 
 import { checkIntent } from '../interceptor.js';
+import { authorizationPermitsExecution } from '../decision.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig, SigilIntent } from '../types.js';
 import { intentFromToolInput, mapToolAction, objectInput } from './shared.js';
@@ -30,7 +31,7 @@ export async function checkAnthropicToolUse(
 
   const result = await checkIntent(intent, config);
 
-  if (result.decision === 'APPROVED') return null;
+  if (authorizationPermitsExecution(result)) return null;
 
   const rejection = buildRejectionContext(result, intent.action);
   return {

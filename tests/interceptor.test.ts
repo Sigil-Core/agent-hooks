@@ -1,6 +1,7 @@
 // tests/interceptor.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { checkIntent } from '../src/interceptor.js';
+import { isTransportFailOpenAuthorization } from '../src/decision.js';
 import { SIGIL_UNREACHABLE } from '../src/types.js';
 import type { SigilHookConfig, SigilIntent } from '../src/types.js';
 
@@ -18,6 +19,173 @@ describe('checkIntent', () => {
     vi.restoreAllMocks();
   });
 
+  it('fails closed before network access when enforce mode has no policy pin', async () => {
+    const result = await checkIntent(
+      { action: 'bash', command: 'ls -la' },
+      { ...BASE_CONFIG, decisionVerificationMode: 'enforce' },
+    );
+
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_DECISION_VERIFICATION_FAILED',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['invalid JSON', '<html>not json</html>'],
+    ['invalid shape', JSON.stringify({ status: 'ALLOWED', policyHash: 7 })],
+  ])(
+    'denies reachable %s in enforce plus fail-open mode',
+    async (_case, body) => {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response(body, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      const result = await checkIntent(
+        { action: 'bash', command: 'ls -la' },
+        {
+          ...BASE_CONFIG,
+          failMode: 'open',
+          decisionVerificationMode: 'enforce',
+          expectedPolicyHash: 'a'.repeat(64),
+        },
+      );
+
+      expect(result.decision).toBe('DENIED');
+      expect(result.errorCode).not.toBe(SIGIL_UNREACHABLE);
+      expect(result.failOpen).toBeUndefined();
+      expect(result.authorization).toBeUndefined();
+    },
+  );
+
+  it.each([429, 500])(
+    'denies reached HTTP %i in enforce plus fail-open mode',
+    async (status) => {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ALLOWED' }), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      const result = await checkIntent(
+        { action: 'bash', command: 'ls -la' },
+        {
+          ...BASE_CONFIG,
+          failMode: 'open',
+          decisionVerificationMode: 'enforce',
+          expectedPolicyHash: 'a'.repeat(64),
+        },
+      );
+
+      expect(result.decision).toBe('DENIED');
+      expect(result.errorCode).not.toBe(SIGIL_UNREACHABLE);
+      expect(result.failOpen).toBeUndefined();
+      expect(result.authorization).toBeUndefined();
+    },
+  );
+
+  it('denies a reached redirect without minting transport fail-open authorization', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, {
+      status: 302,
+      headers: { Location: 'https://attacker.example/authorize' },
+    }));
+    const result = await checkIntent(
+      { action: 'bash', command: 'ls -la' },
+      { ...BASE_CONFIG, failMode: 'open' },
+    );
+
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_RESPONSE_INVALID',
+    });
+    expect(isTransportFailOpenAuthorization(result)).toBe(false);
+    expect((vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit).redirect).toBe('manual');
+  });
+
+  it('logs one missing policy-binding diagnostic on every warn-mode call', async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(
+      JSON.stringify({ status: 'ALLOWED' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await checkIntent({ action: 'bash', command: 'first' }, BASE_CONFIG);
+    await checkIntent({ action: 'bash', command: 'second' }, BASE_CONFIG);
+
+    const policyBindingDiagnostics = warnSpy.mock.calls
+      .map(([value]) => JSON.parse(String(value)) as Record<string, unknown>)
+      .filter((entry) => entry['reason'] === 'policy_binding');
+    expect(policyBindingDiagnostics).toHaveLength(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('denies a verifier diagnostic exception in enforce plus fail-open mode', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'ALLOWED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.spyOn(console, 'warn').mockImplementation(() => {
+      throw new Error('diagnostic sink failed');
+    });
+
+    const result = await checkIntent(
+      { action: 'bash', command: 'ls -la' },
+      {
+        ...BASE_CONFIG,
+        failMode: 'open',
+        decisionVerificationMode: 'enforce',
+        expectedPolicyHash: 'a'.repeat(64),
+      },
+    );
+
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_DECISION_VERIFICATION_FAILED',
+    });
+    expect(result.failOpen).toBeUndefined();
+    expect(result.authorization).toBeUndefined();
+  });
+
+  it('fails closed before network access on invalid enforce trust config', async () => {
+    const result = await checkIntent(
+      { action: 'bash', command: 'ls -la' },
+      {
+        ...BASE_CONFIG,
+        apiUrl: 'http://sign.test.sigilcore.com/v1',
+        decisionVerificationMode: 'enforce',
+        expectedPolicyHash: 'NOT-A-PIN',
+      },
+    );
+
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_DECISION_VERIFICATION_FAILED',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-HTTPS Sign origin before bearer transmission in warn mode', async () => {
+    const result = await checkIntent(
+      { action: 'bash', command: 'ls -la' },
+      {
+        ...BASE_CONFIG,
+        apiUrl: 'http://sign.test.sigilcore.com',
+        decisionVerificationMode: 'warn',
+      },
+    );
+
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_DECISION_VERIFICATION_FAILED',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('returns APPROVED for an allowed bash action', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ status: 'APPROVED', policyHash: 'abc123' }), {
@@ -29,7 +197,7 @@ describe('checkIntent', () => {
     const intent: SigilIntent = { action: 'bash', command: 'ls -la' };
     const result = await checkIntent(intent, BASE_CONFIG);
 
-    expect(result.decision).toBe('APPROVED');
+    expect(result.decision).toBe('ALLOWED');
     expect(result.policyHash).toBe('abc123');
   });
 
@@ -54,7 +222,7 @@ describe('checkIntent', () => {
     );
 
     expect(result).toMatchObject({
-      decision: 'APPROVED',
+      decision: 'ALLOWED',
       policyHash: 'a'.repeat(64),
       intentAttestation: 'header.payload.signature',
       responsePolicy: {
@@ -99,7 +267,7 @@ describe('checkIntent', () => {
     );
     expect(result).toMatchObject({
       decision: 'DENIED',
-      errorCode: SIGIL_UNREACHABLE,
+      errorCode: 'SIGIL_RESPONSE_INVALID',
     });
     warnSpy.mockRestore();
   });
@@ -177,7 +345,7 @@ describe('checkIntent', () => {
     const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
     const result = await checkIntent(intent, config);
 
-    expect(result.decision).toBe('APPROVED');
+    expect(result.decision).toBe('ALLOWED');
     expect(result.message).toBe('Sigil unreachable — fail open');
     expect(result.failOpen).toBe(true);
     expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
@@ -186,7 +354,7 @@ describe('checkIntent', () => {
     warnSpy.mockRestore();
   });
 
-  it('returns APPROVED on non-JSON response body (fail-open)', async () => {
+  it('denies a reached non-JSON response without fail-open', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response('<html>not json</html>', {
         status: 200,
@@ -194,16 +362,14 @@ describe('checkIntent', () => {
       }),
     );
 
-    const onError = vi.fn();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const config = { ...BASE_CONFIG, onError };
     const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
-    const result = await checkIntent(intent, config);
+    const result = await checkIntent(intent, BASE_CONFIG);
 
-    expect(result.decision).toBe('APPROVED');
-    expect(result.message).toBe('Sigil unreachable — fail open');
-    expect(result.failOpen).toBe(true);
-    expect(onError).toHaveBeenCalledWith(intent, expect.any(Error));
+    expect(result.decision).toBe('DENIED');
+    expect(result.errorCode).toBe('SIGIL_RESPONSE_INVALID');
+    expect(result.failOpen).toBeUndefined();
+    expect(result.authorization).toBeUndefined();
     expect(warnSpy).toHaveBeenCalled();
 
     warnSpy.mockRestore();
@@ -214,7 +380,7 @@ describe('checkIntent', () => {
     ['a pending response without a hold ID', { status: 'PENDING' }],
     ['an unknown response status', { status: 'UNKNOWN' }],
     ['a non-string policy hash', { status: 'APPROVED', policyHash: 7 }],
-  ])('routes %s through the configured fail mode', async (_label, body) => {
+  ])('denies reached malformed response %s', async (_label, body) => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify(body), {
         status: 200,
@@ -230,7 +396,9 @@ describe('checkIntent', () => {
     );
 
     expect(result.decision).toBe('DENIED');
-    expect(result.errorCode).toBe(SIGIL_UNREACHABLE);
+    expect(result.errorCode).toBe('SIGIL_RESPONSE_INVALID');
+    expect(result.failOpen).toBeUndefined();
+    expect(result.authorization).toBeUndefined();
     expect(onPending).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
@@ -269,7 +437,7 @@ describe('checkIntent', () => {
     expect(result.failOpen).toBeUndefined();
   });
 
-  it('routes malformed pending responses through open mode', async () => {
+  it('denies malformed pending responses in open mode', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ status: 'PENDING', hold_id: null }), {
         status: 200,
@@ -282,9 +450,10 @@ describe('checkIntent', () => {
       BASE_CONFIG,
     );
 
-    expect(result.decision).toBe('APPROVED');
-    expect(result.errorCode).toBeUndefined();
-    expect(result.failOpen).toBe(true);
+    expect(result.decision).toBe('DENIED');
+    expect(result.errorCode).toBe('SIGIL_RESPONSE_INVALID');
+    expect(result.failOpen).toBeUndefined();
+    expect(result.authorization).toBeUndefined();
   });
 
   it('returns an authentication failure for a 403 without a policy decision', async () => {
@@ -540,7 +709,7 @@ describe('checkIntent', () => {
     expect(body.framework).toBe('openclaw');
   });
 
-  it('returns APPROVED + failOpen:true on 5xx in open mode (default)', async () => {
+  it('returns a non-transport denial on 5xx in open mode', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ status: 'APPROVED' }), {
         status: 500,
@@ -552,8 +721,9 @@ describe('checkIntent', () => {
     const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
     const result = await checkIntent(intent, BASE_CONFIG);
 
-    expect(result.decision).toBe('APPROVED');
-    expect(result.failOpen).toBe(true);
+    expect(result.decision).toBe('DENIED');
+    expect(result.errorCode).toBe('SIGIL_RESPONSE_INVALID');
+    expect(result.failOpen).toBeUndefined();
 
     warnSpy.mockRestore();
   });
@@ -585,8 +755,10 @@ describe('checkIntent', () => {
       const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
       await checkIntent(intent, config);
 
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      const payload = JSON.parse(warnSpy.mock.calls[0][0] as string);
+      const payload = warnSpy.mock.calls
+        .map(([value]) => JSON.parse(value as string))
+        .find((entry) => entry.event === 'sigil_hook_unreachable');
+      expect(payload).toBeDefined();
       expect(payload.event).toBe('sigil_hook_unreachable');
       expect(payload.level).toBe('error');
       expect(payload.failMode).toBe('closed');
@@ -596,7 +768,7 @@ describe('checkIntent', () => {
       warnSpy.mockRestore();
     });
 
-    it('returns DENIED + SIGIL_UNREACHABLE on 500 response in closed mode', async () => {
+    it('returns a non-transport denial on 500 response in closed mode', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
         new Response(JSON.stringify({ status: 'APPROVED' }), {
           status: 500,
@@ -610,12 +782,12 @@ describe('checkIntent', () => {
       const result = await checkIntent(intent, config);
 
       expect(result.decision).toBe('DENIED');
-      expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+      expect(result.errorCode).toBe('SIGIL_RESPONSE_INVALID');
 
       warnSpy.mockRestore();
     });
 
-    it('returns DENIED + SIGIL_UNREACHABLE on 502/503 in closed mode', async () => {
+    it('returns a non-transport denial on 502/503 in closed mode', async () => {
       for (const status of [502, 503]) {
         vi.mocked(fetch).mockResolvedValueOnce(
           new Response(JSON.stringify({}), {
@@ -629,12 +801,12 @@ describe('checkIntent', () => {
         const result = await checkIntent(intent, config);
 
         expect(result.decision).toBe('DENIED');
-        expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+        expect(result.errorCode).toBe('SIGIL_RESPONSE_INVALID');
         warnSpy.mockRestore();
       }
     });
 
-    it('returns DENIED + SIGIL_UNREACHABLE when response body is not JSON (path b)', async () => {
+    it('returns a non-transport denial when a reached response is not JSON', async () => {
       vi.mocked(fetch).mockResolvedValueOnce(
         new Response('<html>not json</html>', {
           status: 200,
@@ -648,7 +820,7 @@ describe('checkIntent', () => {
       const result = await checkIntent(intent, config);
 
       expect(result.decision).toBe('DENIED');
-      expect(result.errorCode).toBe('SIGIL_UNREACHABLE');
+      expect(result.errorCode).toBe('SIGIL_RESPONSE_INVALID');
 
       warnSpy.mockRestore();
     });
@@ -699,7 +871,7 @@ describe('checkIntent', () => {
     const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
     const result = await checkIntent(intent, { ...BASE_CONFIG, requestTimeoutMs: 10 });
 
-    expect(result.decision).toBe('APPROVED');
+    expect(result.decision).toBe('ALLOWED');
     expect(result.failOpen).toBe(true);
 
     warnSpy.mockRestore();
@@ -712,8 +884,10 @@ describe('checkIntent', () => {
     const intent: SigilIntent = { action: 'bash', command: 'echo hello' };
     await checkIntent(intent, BASE_CONFIG);
 
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    const payload = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    const payload = warnSpy.mock.calls
+      .map(([value]) => JSON.parse(value as string))
+      .find((entry) => entry.event === 'sigil_hook_unreachable');
+    expect(payload).toBeDefined();
     expect(payload.event).toBe('sigil_hook_unreachable');
     expect(payload.level).toBe('warn');
     expect(payload.failMode).toBe('open');

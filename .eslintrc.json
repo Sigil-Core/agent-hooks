@@ -11,5 +11,257 @@
   },
   "rules": {
     "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
-  }
+  },
+  "overrides": [
+    {
+      "files": ["scripts/**/*.mjs"],
+      "env": {
+        "node": true
+      }
+    },
+    {
+      "files": ["src/**/*.ts", "tests/crypto-lint-fixtures/**/*.ts"],
+      "excludedFiles": ["src/decision.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "node:crypto",
+                "importNames": ["createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
+                "message": "Raw signature verification is confined to src/decision.ts."
+              },
+              {
+                "name": "crypto",
+                "importNames": ["createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
+                "message": "Raw signature verification is confined to src/decision.ts."
+              },
+              {
+                "name": "jose",
+                "message": "Raw JOSE handling is confined to src/decision.ts."
+              },
+              {
+                "name": "jsonwebtoken",
+                "message": "Raw JOSE handling is confined to src/decision.ts."
+              },
+              {
+                "name": "jws",
+                "message": "Raw JOSE handling is confined to src/decision.ts."
+              }
+            ]
+          }
+        ],
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "ImportDeclaration[source.value='node:crypto'] > ImportNamespaceSpecifier",
+            "message": "Namespace crypto imports can bypass the verifier-boundary import list."
+          },
+          {
+            "selector": "ImportDeclaration[source.value='crypto'] > ImportNamespaceSpecifier",
+            "message": "Namespace crypto imports can bypass the verifier-boundary import list."
+          },
+          {
+            "selector": "ImportExpression[source.value='node:crypto']",
+            "message": "Dynamic crypto imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "ImportExpression[source.value='crypto']",
+            "message": "Dynamic crypto imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "ImportExpression[source.value=/^(jose|jsonwebtoken|jws)$/]",
+            "message": "Dynamic JOSE imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "ImportExpression[source.type!='Literal']",
+            "message": "Computed dynamic imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.value='node:crypto']",
+            "message": "Dynamic crypto imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.value='crypto']",
+            "message": "Dynamic crypto imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.value=/^(jose|jsonwebtoken|jws)$/]",
+            "message": "Dynamic JOSE imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.type!='Literal']",
+            "message": "Computed require calls are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[property.name='verify']",
+            "message": "Web Crypto signature verification is confined to src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[computed=true][property.value='verify']",
+            "message": "Web Crypto signature verification is confined to src/decision.ts."
+          },
+          {
+            "selector": "ObjectPattern > Property[key.name='verify']",
+            "message": "Web Crypto signature verification is confined to src/decision.ts."
+          },
+          {
+            "selector": "ObjectPattern > Property[computed=true][key.value='verify']",
+            "message": "Web Crypto signature verification is confined to src/decision.ts."
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/adapters/**/*.ts", "tests/lint-fixtures/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "../decision.js",
+                "importNames": [
+                  "normalizeDecisionLiteral",
+                  "verifyAuthorizationResponse",
+                  "createTransportFailOpenAuthorization",
+                  "VerifiedAuthorization",
+                  "LegacyUnverifiedAuthorization",
+                  "AuthorizationCapability"
+                ],
+                "message": "Execution adapters consume only opaque authorization helpers."
+              },
+              {
+                "name": "../../src/decision.js",
+                "importNames": [
+                  "normalizeDecisionLiteral",
+                  "verifyAuthorizationResponse",
+                  "createTransportFailOpenAuthorization",
+                  "VerifiedAuthorization",
+                  "LegacyUnverifiedAuthorization",
+                  "AuthorizationCapability"
+                ],
+                "message": "Execution paths cannot import raw decision parsing or verification primitives."
+              },
+              {
+                "name": "../types.js",
+                "importNames": ["SigilDecision"],
+                "message": "Execution adapters cannot branch on raw decision literals."
+              },
+              {
+                "name": "node:crypto",
+                "importNames": ["createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
+                "message": "Raw signature verification is confined to src/decision.ts."
+              },
+              {
+                "name": "crypto",
+                "importNames": ["createPublicKey", "createVerify", "verify", "webcrypto", "subtle"],
+                "message": "Raw signature verification is confined to src/decision.ts."
+              },
+              {
+                "name": "jose",
+                "message": "Raw JOSE handling is confined to src/decision.ts."
+              },
+              {
+                "name": "jsonwebtoken",
+                "message": "Raw JOSE handling is confined to src/decision.ts."
+              },
+              {
+                "name": "jws",
+                "message": "Raw JOSE handling is confined to src/decision.ts."
+              }
+            ]
+          }
+        ],
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "ImportDeclaration[source.value='node:crypto'] > ImportNamespaceSpecifier",
+            "message": "Namespace crypto imports can bypass the verifier-boundary import list."
+          },
+          {
+            "selector": "ImportDeclaration[source.value='crypto'] > ImportNamespaceSpecifier",
+            "message": "Namespace crypto imports can bypass the verifier-boundary import list."
+          },
+          {
+            "selector": "ImportExpression[source.value=/decision\\.js$/]",
+            "message": "Execution adapters cannot dynamically import the decision verifier module."
+          },
+          {
+            "selector": "ImportExpression[source.value='node:crypto']",
+            "message": "Dynamic crypto imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "ImportExpression[source.value='crypto']",
+            "message": "Dynamic crypto imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "ImportExpression[source.value=/^(jose|jsonwebtoken|jws)$/]",
+            "message": "Dynamic JOSE imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "ImportExpression[source.type!='Literal']",
+            "message": "Computed dynamic imports are forbidden in execution paths."
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.value='node:crypto']",
+            "message": "Dynamic crypto imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.value='crypto']",
+            "message": "Dynamic crypto imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.value=/^(jose|jsonwebtoken|jws)$/]",
+            "message": "Dynamic JOSE imports are forbidden outside src/decision.ts."
+          },
+          {
+            "selector": "CallExpression[callee.name='require'][arguments.0.type!='Literal']",
+            "message": "Computed require calls are forbidden in execution paths."
+          },
+          {
+            "selector": "MemberExpression[property.name='verify']",
+            "message": "Web Crypto signature verification is confined to src/decision.ts."
+          },
+          {
+            "selector": "MemberExpression[computed=true][property.value='verify']",
+            "message": "Web Crypto signature verification is confined to src/decision.ts."
+          },
+          {
+            "selector": "ObjectPattern > Property[key.name='verify']",
+            "message": "Web Crypto signature verification is confined to src/decision.ts."
+          },
+          {
+            "selector": "ObjectPattern > Property[computed=true][key.value='verify']",
+            "message": "Web Crypto signature verification is confined to src/decision.ts."
+          },
+          {
+            "selector": "TSImportType",
+            "message": "Execution paths cannot reference authorization capabilities through import types."
+          },
+          {
+            "selector": "ImportDeclaration[source.value=/decision\\.js$/] > ImportNamespaceSpecifier",
+            "message": "Execution paths cannot namespace-import the decision verifier module."
+          },
+          {
+            "selector": "TSAsExpression TSTypeReference Identifier[name=/^(VerifiedAuthorization|LegacyUnverifiedAuthorization|AuthorizationCapability)$/]",
+            "message": "Authorization capabilities cannot be created with type assertions."
+          },
+          {
+            "selector": "TSAsExpression TSTypeReference TSQualifiedName[right.name=/^(VerifiedAuthorization|LegacyUnverifiedAuthorization|AuthorizationCapability)$/]",
+            "message": "Authorization capabilities cannot be created with qualified type assertions."
+          },
+          {
+            "selector": "TSTypeAssertion TSTypeReference Identifier[name=/^(VerifiedAuthorization|LegacyUnverifiedAuthorization|AuthorizationCapability)$/]",
+            "message": "Authorization capabilities cannot be created with angle-bracket assertions."
+          },
+          {
+            "selector": "TSTypeAssertion TSTypeReference TSQualifiedName[right.name=/^(VerifiedAuthorization|LegacyUnverifiedAuthorization|AuthorizationCapability)$/]",
+            "message": "Authorization capabilities cannot be created with qualified angle-bracket assertions."
+          }
+        ]
+      }
+    }
+  ]
 }

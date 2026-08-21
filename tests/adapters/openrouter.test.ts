@@ -133,7 +133,7 @@ describe('createOpenRouterToolGate', () => {
       },
     }, BASE_CONFIG);
 
-    expect(result).toMatchObject({ decision: 'APPROVED', policyHash: 'hash_123' });
+    expect(result).toMatchObject({ decision: 'ALLOWED', policyHash: 'hash_123' });
 
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0]![1] as RequestInit).body as string);
     expect(body.intent.action).toBe('model.inference');

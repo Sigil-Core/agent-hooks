@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-21
+
+### Added
+
+- Strict Ed25519 decision-record and Intent Attestation verification with
+  request nonce, intent, policy, audience, surface, time, and key bindings.
+- Separate opaque `VerifiedAuthorization` and
+  `LegacyUnverifiedAuthorization` capabilities for enforce and warn rollout
+  modes.
+- Frozen decision-record fixtures shared with `agent-hooks-rs`, plus advisory
+  literal and architecture gates with forced-failure tests.
+
+### Changed
+
+- Authorization results now use `ALLOWED`. The deprecated `APPROVED` value is
+  accepted permanently as an input alias, normalized at the parse boundary,
+  and never returned.
+- Authorize requests include a fresh `request_nonce` for signed response
+  binding.
+- `apiUrl` must be an exact canonical HTTPS origin in every verification mode,
+  and enforce mode requires a lowercase 64-character policy hash before any
+  bearer-bearing request.
+- Transport fail mode now applies only when no HTTP response is received.
+  Reached malformed, unverifiable, 429, and 5xx responses deny with a
+  non-transport error code.
+- Bearer-bearing authorize requests use manual redirect handling so reached 3xx
+  responses deny as protocol input instead of being misclassified as transport
+  failure.
+
+### Security
+
+- Execution adapters no longer branch on raw decision strings. They require an
+  opaque capability created by the verification boundary.
+
 ## [0.8.1] - 2026-08-16
 
 ### Added

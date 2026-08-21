@@ -10,10 +10,15 @@
 //   makes a locally approvable hold a compile error.
 // - failMode and framework are forced, not defaulted; configuration cannot
 //   weaken either.
-// - Only a strictly schema-valid explicit APPROVED returns undefined; every
-//   other outcome denies (strictResponse mode in the interceptor).
+// - For governed tools, only a strictly schema-valid allowed capability
+//   returns undefined; every other outcome denies (strictResponse mode in the
+//   interceptor). Excluded tools remain outside this governance boundary.
 
 import { createHash } from 'node:crypto';
+import {
+  authorizationPermitsExecution,
+  isTransportFailOpenAuthorization,
+} from '../decision.js';
 import { checkIntent } from '../interceptor.js';
 import { buildRejectionContext } from '../rejection.js';
 import { mapStrictJsonError, readStrictJson } from '../strict-json.js';
@@ -754,13 +759,13 @@ export function createCoworkPreToolUseHook(config: SigilHookConfig) {
       };
     }
 
-    // Belt: failMode is forced closed, so an APPROVED carrying failOpen can
+    // Belt: failMode is forced closed, so ALLOWED carrying failOpen can
     // never legitimately occur; treat it as a protocol violation.
-    if (result.decision === 'APPROVED' && result.failOpen === true) {
+    if (isTransportFailOpenAuthorization(result)) {
       result = {
         decision: 'DENIED',
         errorCode: SIGIL_RESPONSE_INVALID,
-        message: 'Protocol violation: APPROVED with failOpen under forced fail-closed mode.',
+        message: 'Protocol violation: ALLOWED with failOpen under forced fail-closed mode.',
       };
     }
 
@@ -776,7 +781,7 @@ export function createCoworkPreToolUseHook(config: SigilHookConfig) {
       reachability: reachabilityFor(result),
     });
 
-    if (result.decision === 'APPROVED') return undefined;
+    if (authorizationPermitsExecution(result)) return undefined;
     return denyResult(result, intent.action);
   };
 }

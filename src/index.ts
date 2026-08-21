@@ -1,6 +1,12 @@
 // src/index.ts
 
 export { checkIntent } from './interceptor.js';
+export {
+  authorizationPermitsExecution,
+  isTransportFailOpenAuthorization,
+  normalizeDecisionLiteral,
+  verifyAuthorizationResponse,
+} from './decision.js';
 export { checkResult } from './check-result.js';
 export {
   verifyAndCheckResult,
@@ -17,6 +23,17 @@ export {
   RESPONSE_CLASS_CATALOG_V1,
   RESPONSE_CLASS_CATALOG_V1_DIGEST,
 } from './check-result.js';
+export type {
+  AuthorizationCapability,
+  AuthorizationVerificationContext,
+  AuthorizationVerificationResult,
+  DecisionJwk,
+  DecisionSurface,
+  DecisionVerificationMode,
+  DecisionVerificationReason,
+  LegacyUnverifiedAuthorization,
+  VerifiedAuthorization,
+} from './decision.js';
 export type {
   CompiledResponsePolicyVerificationContext,
   CryptoAdapter,

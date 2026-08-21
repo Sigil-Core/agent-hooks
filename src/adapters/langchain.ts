@@ -2,6 +2,7 @@
 // Compatible with LangChain Tool interface
 
 import { checkIntent } from '../interceptor.js';
+import { authorizationPermitsExecution } from '../decision.js';
 import { buildRejectionContext } from '../rejection.js';
 import type { SigilHookConfig } from '../types.js';
 import { intentFromToolInput, mapToolAction, objectInput } from './shared.js';
@@ -25,7 +26,7 @@ export function wrapLangChainTool<T extends { name: string; call: (input: string
       config,
     );
 
-    if (result.decision === 'APPROVED') {
+    if (authorizationPermitsExecution(result)) {
       return originalCall(input);
     }
 
