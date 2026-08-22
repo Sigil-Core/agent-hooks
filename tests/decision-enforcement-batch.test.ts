@@ -95,6 +95,7 @@ const mutateCompactJws = (
       ).toString('base64url');
       return `${mutatedHeader}.${payload}.${signature}`;
     }
+    default: throw new Error(`Unsupported malformed-JOSE mutation: ${String(mutation)}`);
   }
 };
 
