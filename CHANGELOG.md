@@ -145,7 +145,7 @@ Version note: this release is `0.7.0`, not `0.6.0`, because `0.6.0` shipped to n
 ### Added
 
 - `readStrictJson` / `mapStrictJsonError` (`src/strict-json.ts`), supported package-root exports: a duplicate-aware strict JSON reader operating on raw bytes. Rejects duplicate keys at every nesting level (`JSON.parse` destroys that evidence), enforces a UTF-8 byte cap, decodes UTF-8 strictly, bounds nesting depth, and requires an object root. Each failure class maps to exactly one public error code; `oversize` splits by context (`SIGIL_INPUT_TOO_LARGE` on stdin, `SIGIL_RESPONSE_INVALID` on a response).
-- `strictResponse` interceptor mode, selected by the Cowork adapter: the Sign response body is read under a 64 KiB cap with a body-read deadline, parsed by the strict reader, and validated against an exact status schema **before** any APPROVED can be produced. Only a strictly schema-valid explicit `APPROVED` (object; `status`; optional string `policy_hash`/`task_id`; any unknown field rejects) can approve. Malformed JSON, missing/unknown/wrong-typed `status`, duplicate keys, truncated or oversized bodies, HTML interstitials, 204/206/3xx/4xx, `PENDING` without `hold_id`, `DENIED` without `error_code`, and `APPROVED` carrying cross-status fields (`hold_id`, `error_code`, `failOpen`) all deny with `SIGIL_RESPONSE_INVALID`; 429 denies fast with `SIGIL_RATE_LIMITED`. The default path for every other adapter is unchanged and pinned by a before-and-after regression suite.
+- `strictResponse` interceptor mode, selected by the Cowork adapter: the Sign response body is read under a 64 KiB cap with a body-read deadline, parsed by the strict reader, and validated against an exact status schema **before** any positive authorization can be produced. Only a strictly schema-valid explicit positive status (object; `status`; optional string `policy_hash`/`task_id`; any unknown field rejects) can approve. Malformed JSON, missing/unknown/wrong-typed `status`, duplicate keys, truncated or oversized bodies, HTML interstitials, 204/206/3xx/4xx, `PENDING` without `hold_id`, `DENIED` without `error_code`, and a positive status carrying cross-status fields (`hold_id`, `error_code`, `failOpen`) all deny with `SIGIL_RESPONSE_INVALID`; 429 denies fast with `SIGIL_RATE_LIMITED`. The default path for every other adapter is unchanged and pinned by a before-and-after regression suite.
 - `signal?: AbortSignal` on `SigilHookConfig`, propagated into `fetch` so an aborted caller deadline cancels the in-flight socket rather than leaving it open behind a settled process.
 - `onDiagnostic?: (d: SigilDiagnostic) => void`: structured audit fields (`decision`, `errorCode`, `holdId`, `policyHash`, `taskId`, `toolName`, `classification`, `latencyMs`, `reachability`) so hook wrappers never parse the deny reason string. An approved governed call is distinguishable from an excluded-tool skip.
 - Cowork adapter rework (`src/adapters/cowork.ts`):
@@ -266,7 +266,7 @@ Version note: this release is `0.7.0`, not `0.6.0`, because `0.6.0` shipped to n
 
 - `SigilHookConfig.failMode?: 'open' | 'closed'` — configurable unreachability behavior. Default `'open'` preserves v0.1.0 behavior.
 - `SigilHookConfig.requestTimeoutMs?: number` — request timeout via `AbortController` (default `10_000` ms).
-- `SigilHookResult.failOpen?: boolean` — set to `true` when `APPROVED` was returned via the fail-open fallback rather than real policy evaluation.
+- `SigilHookResult.failOpen?: boolean` — set to `true` when a positive result was returned via the fail-open fallback rather than real policy evaluation.
 - `SIGIL_UNREACHABLE` — new error code surfaced on `DENIED` in `failMode: 'closed'` when Sigil is unreachable. Exported as both a runtime constant and a type-level discriminant.
 - `buildRejectionContext` now produces a dedicated branch for `SIGIL_UNREACHABLE` with transient-failure `sigil_next_steps` ("pause and retry when restored; do not report a policy violation").
 - `createOpenclawSigilHandler` — native adapter for OpenClaw's `before_tool_call` plugin hook. Also covers NVIDIA NemoClaw (same hook surface).
@@ -276,7 +276,7 @@ Version note: this release is `0.7.0`, not `0.6.0`, because `0.6.0` shipped to n
 
 ### Changed
 
-- **Behavior change — 5xx responses in `failMode: 'open'`:** a `5xx` response with a valid-but-empty JSON body previously surfaced as `DENIED` + `SIGIL_POLICY_VIOLATION`. It now surfaces as `APPROVED + failOpen: true` — consistent with the fail-open contract. Hosts that branched on the old `SIGIL_POLICY_VIOLATION` for 5xx should migrate to branching on `failOpen`.
+- **Behavior change — 5xx responses in `failMode: 'open'`:** a `5xx` response with a valid-but-empty JSON body previously surfaced as `DENIED` + `SIGIL_POLICY_VIOLATION`. It now surfaces as a positive result with `failOpen: true` — consistent with the fail-open contract. Hosts that branched on the old `SIGIL_POLICY_VIOLATION` for 5xx should migrate to branching on `failOpen`.
 - Log event renamed: `sigil_hook_network_error` → `sigil_hook_unreachable`. Payload now includes `failMode` and uses `error` level in closed mode (was always `warn`).
 
 ### Deferred
