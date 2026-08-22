@@ -6,6 +6,7 @@ import type { SigilHookConfig } from '../../src/types.js';
 const BASE_CONFIG: SigilHookConfig = {
   apiKey: 'sk_sigil_test_key',
   apiUrl: 'https://sign.test.sigilcore.com',
+  decisionVerificationMode: 'warn',
 };
 
 describe('createHermesPreToolCallHook', () => {

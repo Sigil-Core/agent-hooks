@@ -16,6 +16,7 @@ const BASE_CONFIG: SigilHookConfig = {
   apiKey: 'sk_sigil_test_key',
   agentId: 'fixture-agent',
   taskId: 'fixture-task-1',
+  decisionVerificationMode: 'warn',
 };
 
 const FIXTURE_REQUEST_NONCE = '00000000-0000-4000-8000-000000000000';
@@ -102,6 +103,7 @@ async function captureCoworkWireBody(): Promise<string> {
       apiKey: 'sk_sigil_test_key',
       agentId: 'fixture-agent',
       apiUrl,
+      decisionVerificationMode: 'warn',
     });
     await hook(COWORK_FIXTURE_PAYLOAD);
   });

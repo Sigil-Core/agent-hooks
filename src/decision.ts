@@ -85,7 +85,7 @@ interface VerifiedToken extends ParsedJws {
   kid: string;
 }
 
-const AGENT_HOOKS_VERSION = '0.9.0';
+const AGENT_HOOKS_VERSION = '0.10.0';
 const TOKEN_MAX_BYTES = 8 * 1024;
 const JWKS_MAX_BYTES = 64 * 1024;
 const JWKS_MAX_KEYS = 16;

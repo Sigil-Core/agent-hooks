@@ -152,6 +152,7 @@ import { checkAnthropicToolUse } from '@sigilcore/agent-hooks';
 
 const config = {
   apiKey: process.env.SIGIL_API_KEY!,
+  expectedPolicyHash: process.env.SIGIL_POLICY_HASH!,
   agentId: 'my-claude-agent',
 };
 
@@ -171,6 +172,7 @@ import { checkElizaAction } from '@sigilcore/agent-hooks';
 
 const config = {
   apiKey: process.env.SIGIL_API_KEY!,
+  expectedPolicyHash: process.env.SIGIL_POLICY_HASH!,
   agentId: 'my-eliza-agent',
 };
 
@@ -189,6 +191,7 @@ import { wrapLangChainTool } from '@sigilcore/agent-hooks';
 
 const config = {
   apiKey: process.env.SIGIL_API_KEY!,
+  expectedPolicyHash: process.env.SIGIL_POLICY_HASH!,
   agentId: 'my-langchain-agent',
 };
 
@@ -206,6 +209,7 @@ import { createOpenclawSigilHandler } from '@sigilcore/agent-hooks';
 
 const sigilHandler = createOpenclawSigilHandler({
   apiKey: process.env.SIGIL_API_KEY!,
+  expectedPolicyHash: process.env.SIGIL_POLICY_HASH!,
   agentId: 'my-openclaw-agent',
   failMode: 'closed', // recommended for production
 });
@@ -257,7 +261,12 @@ import { checkIntent, buildRejectionContext } from '@sigilcore/agent-hooks';
 // Before submitting a tool call to IronClaw's HTTP / MCP interface:
 const result = await checkIntent(
   { action: 'bash', command: toolCall.args.command, agentId: 'ironclaw-agent' },
-  { apiKey: process.env.SIGIL_API_KEY!, framework: 'ironclaw', failMode: 'closed' },
+  {
+    apiKey: process.env.SIGIL_API_KEY!,
+    expectedPolicyHash: process.env.SIGIL_POLICY_HASH!,
+    framework: 'ironclaw',
+    failMode: 'closed',
+  },
 );
 if (result.decision !== 'ALLOWED') {
   // Do not dispatch; feed the rejection back to the upstream caller.
@@ -300,6 +309,7 @@ import { createCoworkPreToolUseHook } from '@sigilcore/agent-hooks';
 
 const hook = createCoworkPreToolUseHook({
   apiKey: process.env.CLAUDE_PLUGIN_OPTION_SIGIL_API_KEY!,
+  expectedPolicyHash: process.env.SIGIL_POLICY_HASH!,
   agentId: 'cowork',
 });
 
@@ -541,8 +551,8 @@ For transient unreachability (only surfaces when `failMode: 'closed'`):
 | `framework` | `string` | No | `'agent-hooks'` | Framework identifier — see [`FRAMEWORKS`](./src/framework-registry.ts) |
 | `failMode` | `'open' \| 'closed'` | No | `'open'` | Behavior when Sigil is unreachable — see Fail Modes below |
 | `requestTimeoutMs` | `number` | No | `10000` | Request timeout in milliseconds |
-| `decisionVerificationMode` | `'warn' \| 'enforce'` | No | `'warn'` | Warn preserves legacy `ALLOWED` execution when signed material is missing or invalid; its `LegacyUnverifiedAuthorization` is not proof of verification. Enforce mode requires authorization to be signed and bound. |
-| `expectedPolicyHash` | `string` | Enforce only | — | Required lowercase 64-character SHA-256 policy pin. Enforce mode denies before network access when it is absent or malformed. |
+| `decisionVerificationMode` | `'warn' \| 'enforce'` | No | `'enforce'` | Enforce requires authorization to be signed and bound. Explicit warn is the package-rollback compatibility mode and may preserve legacy execution with an unverified capability. |
+| `expectedPolicyHash` | `string` | Enforce only | — | Required lowercase 64-character SHA-256 policy pin from trusted local deployment state. The default enforce mode denies before network access when it is absent or malformed. |
 | `decisionRecordJwk` | `DecisionJwk` | No | — | Static Ed25519 key pin. It takes precedence over JWKS discovery. |
 | `attestationIssuer` | `string` | No | `'sigil-core'` | Expected issuer for Intent Attestations. |
 | `onDenied` | `function` | No | — | Callback when action is denied |
@@ -553,20 +563,37 @@ For transient unreachability (only surfaces when `failMode: 'closed'`):
 
 Every authorize request now carries a fresh `request_nonce`. The SDK accepts
 the deprecated `APPROVED` input alias, normalizes it to `ALLOWED`, and never
-returns the deprecated value. Warn mode keeps unsigned responses working while
-the Sign emitter rolls forward. It also preserves legacy `ALLOWED` execution
-when signed material is present but verification fails. Both paths issue a
-distinct `LegacyUnverifiedAuthorization` capability and log the stable failure
-reason; that legacy capability is rollout compatibility evidence, not proof of
-verification. Enforce mode authorizes only after the decision record and Intent
+returns the deprecated value. Enforce mode is the default. For every reached
+authorization response, it authorizes only after the decision record and Intent
 Attestation verify and cross-bind to the request nonce, intent hash, and
-configured policy hash.
+configured policy hash. Explicit warn mode is retained only for package
+rollback. It keeps unsigned responses working and preserves legacy `ALLOWED`
+execution when signed material is present but verification fails. Both warn
+paths issue a distinct `LegacyUnverifiedAuthorization` capability and log the
+stable failure reason; that legacy capability is compatibility evidence, not
+proof of verification.
 When warn mode has no `expectedPolicyHash`, every authorize call emits exactly
 one `policy_binding` diagnostic. The warning is per call so operators can
 measure every execution that lacks a policy pin during rollout.
 
 Adapters branch on the opaque authorization capability. A raw body containing
 `status: "ALLOWED"` cannot authorize execution in enforce mode.
+
+### Wave 3 enforcement preflight
+
+`npm run decision:batch` runs the deterministic 29-case source preflight in
+enforce mode: 23 frozen decision vectors plus six malformed-JOSE vectors. It
+reports separate counters for unexpected valid-case verification failures,
+negative-case tamper accepts, legacy-path fallbacks, and stable reason-code
+mismatches. It also asserts every negative decision outcome; all counters must
+be zero. `npm run decision:gate`,
+`npm run decision:gate:capability`, and `npm run decision:gate:imports` are
+blocking controls.
+
+This local source preflight is not registry evidence. Release evidence must run
+the same entry point from an isolated exact `@sigilcore/agent-hooks@0.10.0`
+installation in both ESM and CommonJS and bind the npm artifact, release tag,
+and source commit.
 
 ## Fail Modes
 

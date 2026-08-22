@@ -20,6 +20,9 @@ jobs:
       - run: npm run publish:guard
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm run decision:gate
+      - run: npm run decision:gate:blocking
+      - run: npm run decision:gate:capability
+      - run: npm run decision:gate:imports
+      - run: npm run decision:batch
       - run: npm test
       - run: npm run build

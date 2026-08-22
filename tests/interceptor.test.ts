@@ -8,6 +8,7 @@ import type { SigilHookConfig, SigilIntent } from '../src/types.js';
 const BASE_CONFIG: SigilHookConfig = {
   apiKey: 'sk_sigil_test_key',
   apiUrl: 'https://sign.test.sigilcore.com',
+  decisionVerificationMode: 'warn',
 };
 
 describe('checkIntent', () => {
@@ -17,6 +18,45 @@ describe('checkIntent', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('defaults to enforce and fails before network access without a policy pin', async () => {
+    const result = await checkIntent(
+      { action: 'bash', command: 'ls -la' },
+      {
+        apiKey: BASE_CONFIG.apiKey,
+        apiUrl: BASE_CONFIG.apiUrl,
+      },
+    );
+
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_DECISION_VERIFICATION_FAILED',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('uses enforce verification when the mode is omitted and a policy pin exists', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(
+      JSON.stringify({ status: 'ALLOWED' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    const result = await checkIntent(
+      { action: 'bash', command: 'ls -la' },
+      {
+        apiKey: BASE_CONFIG.apiKey,
+        apiUrl: BASE_CONFIG.apiUrl,
+        expectedPolicyHash: 'a'.repeat(64),
+      },
+    );
+
+    expect(result).toMatchObject({
+      decision: 'DENIED',
+      errorCode: 'SIGIL_DECISION_VERIFICATION_FAILED',
+      message: expect.stringContaining('record_missing'),
+    });
+    expect(result.authorization).toBeUndefined();
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed before network access when enforce mode has no policy pin', async () => {

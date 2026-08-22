@@ -4,6 +4,32 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-21
+
+### Added
+
+- A deterministic 29-case enforce-mode source preflight with separate zero
+  counters for unexpected valid-case failures, negative-case tamper accepts,
+  legacy-path fallbacks, stable reason-code mismatches, and negative decision
+  mismatches. Exact published-artifact ESM and CommonJS proof remains a release
+  gate, not a local claim.
+- Named library-level drills for the clock-skew boundaries, cold-cache JWKS
+  outage, two-key rotation overlap, oversized token and JWKS input, and signed-
+  record tampering.
+
+### Changed
+
+- Decision-record verification now defaults to `enforce`; callers must provide
+  a trusted lowercase SHA-256 policy pin. Explicit `warn` remains available as
+  the documented package-rollback compatibility mode.
+- Literal hygiene, opaque-capability, and execution-import controls are
+  explicit blocking CI gates.
+
+### Security
+
+- Omitting `decisionVerificationMode` can no longer reach the unsigned legacy
+  response path. Missing or malformed policy pins deny before network access.
+
 ## [0.9.0] - 2026-08-21
 
 ### Added

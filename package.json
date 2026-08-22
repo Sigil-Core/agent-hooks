@@ -1,6 +1,6 @@
 {
   "name": "@sigilcore/agent-hooks",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "PreToolUse interceptor for autonomous AI agents - policy enforcement via Sigil Sign",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -30,8 +30,11 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
-    "decision:gate": "node scripts/decision-literal-gate.mjs",
+    "decision:gate": "node scripts/decision-literal-gate.mjs --blocking",
     "decision:gate:blocking": "node scripts/decision-literal-gate.mjs --blocking",
+    "decision:gate:capability": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck tests/capability.compile.ts",
+    "decision:gate:imports": "vitest run tests/architecture-bypass-gates.test.ts tests/gates.test.ts",
+    "decision:batch": "vitest run tests/decision-enforcement-batch.test.ts",
     "publish:guard": "node scripts/publish-guard.mjs"
   },
   "license": "MIT",
