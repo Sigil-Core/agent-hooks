@@ -55,6 +55,7 @@ describe('shared TOOL_ACTION_MAP non-regression against the v0.5.3 baseline', ()
     const CONFIG: SigilHookConfig = {
       apiKey: 'sk_sigil_test_key',
       apiUrl: 'https://sign.test.sigilcore.com',
+      decisionVerificationMode: 'warn',
     };
 
     beforeEach(() => {

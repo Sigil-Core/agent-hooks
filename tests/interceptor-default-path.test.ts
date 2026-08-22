@@ -12,6 +12,7 @@ import type { SigilHookConfig } from '../src/types.js';
 const OPEN_CONFIG: SigilHookConfig = {
   apiKey: 'sk_sigil_test_key',
   apiUrl: 'https://sign.test.sigilcore.com',
+  decisionVerificationMode: 'warn',
 };
 
 describe('default response path is unchanged by the strictResponse addition', () => {

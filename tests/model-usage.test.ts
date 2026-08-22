@@ -14,6 +14,7 @@ const BASE_CONFIG: SigilHookConfig = {
   apiKey: 'sk_sigil_test_key',
   apiUrl: 'https://sign.test.sigilcore.com',
   taskId: 'task-model-1',
+  decisionVerificationMode: 'warn',
 };
 
 describe('model usage ledger', () => {

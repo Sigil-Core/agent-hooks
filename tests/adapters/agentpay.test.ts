@@ -7,6 +7,7 @@ const BASE_CONFIG: SigilHookConfig = {
   apiKey: 'sk_sigil_test_key',
   apiUrl: 'https://sign.test.sigilcore.com',
   failMode: 'open',
+  decisionVerificationMode: 'warn',
 };
 
 describe('checkAgentPayTransfer', () => {

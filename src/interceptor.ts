@@ -18,6 +18,7 @@ import {
 } from './types.js';
 
 const DEFAULT_API_URL = 'https://sign.sigilcore.com';
+const DEFAULT_DECISION_VERIFICATION_MODE = 'enforce' as const;
 
 /** strictResponse mode: response body cap in UTF-8 bytes (64 KiB). */
 const STRICT_RESPONSE_BODY_CAP_BYTES = 64 * 1024;
@@ -487,8 +488,10 @@ const configurationError = (
   } catch {
     return 'apiUrl must be an exact canonical HTTPS origin.';
   }
+  const verificationMode = config.decisionVerificationMode
+    ?? DEFAULT_DECISION_VERIFICATION_MODE;
   if (
-    config.decisionVerificationMode === 'enforce' &&
+    verificationMode === 'enforce' &&
     (config.expectedPolicyHash === undefined || !HEX_64.test(config.expectedPolicyHash))
   ) {
     return 'Enforce mode requires a lowercase SHA-256 expected policy hash.';
@@ -504,7 +507,7 @@ const requestAuthorization = async (
   const requestBody = buildAuthorizeRequestBody(intent, config);
   const body = `${JSON.stringify(requestBody, null, 2)}\n`;
   const verificationContext: AuthorizationVerificationContext = {
-    mode: config.decisionVerificationMode ?? 'warn',
+    mode: config.decisionVerificationMode ?? DEFAULT_DECISION_VERIFICATION_MODE,
     signOrigin: apiUrl,
     expectedPolicyHash: config.expectedPolicyHash,
     txCommit: getString(requestBody['txCommit']) as string,

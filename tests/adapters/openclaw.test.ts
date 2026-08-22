@@ -11,6 +11,7 @@ import type {
 const BASE_CONFIG: SigilHookConfig = {
   apiKey: 'sk_sigil_test_key',
   apiUrl: 'https://sign.test.sigilcore.com',
+  decisionVerificationMode: 'warn',
 };
 
 const BASE_CTX: OpenclawToolContext = {
