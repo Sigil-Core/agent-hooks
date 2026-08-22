@@ -561,9 +561,10 @@ For transient unreachability (only surfaces when `failMode: 'closed'`):
 
 ### Signed authorization responses
 
-Every authorize request now carries a fresh `request_nonce`. The SDK accepts
-the deprecated positive-outcome input alias, normalizes it to `ALLOWED`, and
-never returns the deprecated value. Enforce mode is the default. For every
+Every authorize request now carries a fresh `request_nonce`. The
+[0.9.0 compatibility note](CHANGELOG.md#090---2026-08-21) identifies the exact
+deprecated positive-outcome input alias. The SDK accepts that alias, normalizes
+it to `ALLOWED`, and never returns it. Enforce mode is the default. For every
 reached authorization response, it authorizes only after the decision record
 and Intent Attestation verify and cross-bind to the request nonce, intent hash, and
 configured policy hash. Explicit warn mode is retained only for package
