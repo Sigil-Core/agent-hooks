@@ -18,8 +18,10 @@ Two external controls back that name.
    restriction rather than a label. Until it is set, the environment is
    documentation, not a gate.
 
-Publication is release-gated, so neither of these blocks a merge; a mismatch
-surfaces on the next published release, not on the default branch.
+Production publication is release-gated. The Phase 6 candidate path is a
+manual staged publication from the same workflow and environment. It makes the
+candidate unavailable to public installs until an operator completes npm's
+proof-of-presence approval.
 
 ## Published source commit
 
@@ -35,45 +37,40 @@ as `SIGIL_SOURCE_COMMIT` and is what the published artifact reports on
 `X-Sigil-Client`. A local or fork build with no such value omits `commit`
 instead of guessing.
 
-## Staged probe acceptance
+## Phase 6 staged release and rollback
 
-**This repository's `publish.yml` contains exactly one job, the release-gated
-production `publish` job. There is no manual staged job here.** The rules below
-describe the contract the guard enforces *if* a staged path is added, and the
-contract the separate P-12 probe package must satisfy in its own workflow. They
-are not a description of a job that exists today.
+`publish.yml` contains one manual `stage-publish` job. It builds the exact
+`main` commit with the same checks as the release job, then submits the package
+with `npm stage publish` under the non-latest `fleet-phase6` dist-tag. The
+trusted publisher must allow staged publication. The job cannot make the
+version publicly installable or move `latest` by itself.
 
-The P-12 probe is a separate, non-production publication path. Its manual job
-may submit exactly one reviewed tarball with `npm stage publish`, a non-latest
-dist-tag, and provenance. A direct `npm publish` is not valid in the probe
-job. The publication guard rejects a second command, a command hidden in a
-different step, or a direct publish spelled with backslash escapes or quote
-characters. Its shell handling is deliberately bounded: it does not resolve
-variable expansion, command substitution, `eval`, or encoded payloads. See
-`docs/architecture.md` for the full statement of what the guard does and does
-not promise.
+The publication guard permits exactly one staged command in the manual job. A
+direct `npm publish` is invalid there. The guard rejects a second command, a
+command hidden in a different step, or a direct publish spelled with backslash
+escapes or quote characters. Its shell handling is deliberately bounded: it
+does not resolve variable expansion, command substitution, `eval`, or encoded
+payloads. See `docs/architecture.md` for the full boundary.
 
-The production package has one trusted npm publisher: the release workflow
-for `Sigil-Core/agent-hooks`. A temporary P-12 probe package must use its own
-temporary publisher record restricted to staged publication. Never reuse the
-production package's publisher for the probe.
+The production package has one trusted npm publisher: this workflow for
+`Sigil-Core/agent-hooks`. No npm token is stored in GitHub.
 
 Acceptance is bound to the exact staged package name, version, tarball digest,
 repository metadata, provenance receipt, and reviewed workflow ref. Keep the
-bootstrap package available under its non-latest `s12-probe` rollback tag while
-these checks run.
+previous version available under the non-latest `fleet-phase6` rollback tag
+while these checks run.
 
-After the exact staged approval is recorded, the operator may perform one
-`latest` dist-tag repoint for the approved version. The acceptance path keeps
-the bootstrap rollback tag and the previous version available; it does not
-depend on removing the only `latest` release. If the staged artifact or its
-approval changes, stop and start a new staged run instead of repeating the
+After the exact staged approval is recorded, the operator rehearses rollback
+by moving `fleet-phase6` to the previous version and proving that version
+resolves, then restores `fleet-phase6` to the approved candidate. Only then may
+the operator move `latest` to the approved version. If the staged artifact or
+its approval changes, stop and start a new staged run instead of repeating the
 repoint.
 
 ## One-challenge rule
 
-Once both publisher records are configured, the `npm-production` gate permits
-one challenge for an exact staged artifact.
+Once the trusted publisher allows both direct and staged publication, the
+`npm-production` gate permits one challenge for an exact staged artifact.
 When the challenge is not satisfied, the run stops. A new artifact and a fresh
 staged review are required before another challenge or any `latest` repoint.
 This prevents repeated prompts from becoming an implicit approval loop.

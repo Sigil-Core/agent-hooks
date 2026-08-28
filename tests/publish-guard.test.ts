@@ -11,6 +11,9 @@ const workflowPath = resolve(root, '.github/workflows/publish.yml');
 const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
 const workflow = readFileSync(workflowPath, 'utf8');
 const publishingDocs = readFileSync(resolve(root, 'docs/publishing.md'), 'utf8');
+const architectureDocs = readFileSync(resolve(root, 'docs/architecture.md'), 'utf8');
+const runtimeDocs = readFileSync(resolve(root, 'runtime.md'), 'utf8');
+const readme = readFileSync(resolve(root, 'README.md'), 'utf8');
 
 function runGuard(source = workflow) {
   const directory = mkdtempSync(join(tmpdir(), 'publish-guard-'));
@@ -31,6 +34,12 @@ function evaluate(source: string) {
   );
 }
 
+function replaceLast(source: string, target: string, replacement: string) {
+  const index = source.lastIndexOf(target);
+  if (index === -1) return source;
+  return `${source.slice(0, index)}${replacement}${source.slice(index + target.length)}`;
+}
+
 describe('npm publication guard', () => {
   it('accepts the production trusted-publishing contract', () => {
     const result = runGuard();
@@ -41,7 +50,8 @@ describe('npm publication guard', () => {
   });
 
   it('rejects guard-before-install even when another job has the correct order', () => {
-    const reversed = workflow.replace(
+    const reversed = replaceLast(
+      workflow,
       [
         '      - run: npm ci',
         '',
@@ -78,23 +88,18 @@ describe('npm publication guard', () => {
     // Assert the two contract facts the docs must carry, not brittle prose.
     expect(publishingDocs).toContain('npm trusted publisher');
     expect(publishingDocs).toContain('npm-production');
+    expect(architectureDocs).toContain('fleet-phase6');
+    expect(runtimeDocs).toContain('fleet-phase6');
+    expect(`${publishingDocs}\n${architectureDocs}\n${runtimeDocs}`).not.toContain('P-12');
+    expect(`${architectureDocs}\n${runtimeDocs}`).not.toContain('s12-probe');
+    expect(readme).toContain(`@sigilcore/agent-hooks@${packageJson.version}`);
   });
 
-  it('accepts one manual P-12 stage publish and rejects direct publish', () => {
-    const tarballReference = ['$', '{TARBALL}'].join('');
-    const manualJob = `
-  stage-publish:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Stage probe
-        if: inputs.mode == 'stage-publish'
-        run: npm stage publish "${tarballReference}" --tag s12-probe --provenance
-`;
-    const staged = workflow + manualJob;
-    expect(runGuard(staged).status).toBe(0);
+  it('accepts the Phase 6 staged path and rejects direct publication from it', () => {
+    expect(workflow).toContain('npm stage publish --access public --provenance --tag fleet-phase6');
+    expect(runGuard(workflow).status).toBe(0);
 
-    const direct = staged.replace('npm stage publish', 'npm publish');
+    const direct = workflow.replace('npm stage publish', 'npm publish');
     const result = runGuard(direct);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('workflow_dispatch publication must use npm stage publish');
@@ -117,16 +122,72 @@ describe('npm publication guard', () => {
   });
 
   it('rejects a staged command that targets latest', () => {
-    const staged = `${workflow}
-  stage-publish:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - run: npm stage publish artifact.tgz --tag latest --provenance
-`;
+    const staged = workflow.replace('--tag fleet-phase6', '--tag latest');
+    expect(staged).not.toBe(workflow);
     const result = runGuard(staged);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('must not target latest');
+    expect(result.stderr).toContain('must use exactly --tag fleet-phase6');
+  });
+
+  it('confines the staged job to the protected trusted-publishing boundary', () => {
+    const noEnvironment = workflow.replace(
+      ['    environment:', '      name: npm-production'].join('\n'),
+      '',
+    );
+    expect(runGuard(noEnvironment).stderr).toContain('must use the npm-production environment');
+
+    const selfHosted = workflow.replace('    runs-on: ubuntu-latest', '    runs-on: self-hosted');
+    expect(runGuard(selfHosted).stderr).toContain('GitHub-hosted ubuntu-latest');
+
+    const wrongRegistry = workflow.replace(
+      'registry-url: https://registry.npmjs.org/',
+      'registry-url: https://registry.example.invalid/',
+    );
+    expect(runGuard(wrongRegistry).stderr).toContain('registry https://registry.npmjs.org/');
+
+    const privateAccess = workflow.replace(
+      'npm stage publish --access public',
+      'npm stage publish --access restricted',
+    );
+    expect(runGuard(privateAccess).stderr).toContain('must set public access');
+
+    const wrongTag = workflow.replace('--tag fleet-phase6', '--tag fleet-other');
+    expect(runGuard(wrongTag).stderr).toContain('must use exactly --tag fleet-phase6');
+  });
+
+  it.each([
+    ['registry override', 'npm stage publish --registry=https://registry.example.invalid/ --access public --provenance --tag fleet-phase6'],
+    ['artifact operand', 'npm stage publish artifact.tgz --access public --provenance --tag fleet-phase6'],
+    ['dry run', 'npm stage publish --access public --provenance --tag fleet-phase6 --dry-run'],
+    ['duplicate access', 'npm stage publish --access public --provenance --tag fleet-phase6 --access restricted'],
+    ['registry environment prefix', 'NPM_CONFIG_REGISTRY=https://registry.example.invalid/ npm stage publish --access public --provenance --tag fleet-phase6'],
+    ['registry config prefix', 'npm config set registry https://registry.example.invalid/ && npm stage publish --access public --provenance --tag fleet-phase6'],
+    ['quoted comment with registry override', 'npm stage publish --access public --provenance --tag fleet-phase6 " #" --registry=https://registry.example.invalid/'],
+    ['empty artifact operand', 'npm stage publish --access public --provenance --tag fleet-phase6 ""'],
+  ])('rejects a staged %s', (_label, command) => {
+    const mutated = workflow.replace(
+      'npm stage publish --access public --provenance --tag fleet-phase6',
+      command,
+    );
+    expect(runGuard(mutated).stderr).toContain('staged publication command must be exactly');
+  });
+
+  it.each([
+    ['registry override', 'npm publish --registry=https://registry.example.invalid/ --access public --provenance'],
+    ['artifact operand', 'npm publish artifact.tgz --access public --provenance'],
+    ['dry run', 'npm publish --access public --provenance --dry-run'],
+    ['duplicate access', 'npm publish --access public --provenance --access restricted'],
+    ['registry environment prefix', 'NPM_CONFIG_REGISTRY=https://registry.example.invalid/ npm publish --access public --provenance'],
+    ['registry config prefix', 'npm config set registry https://registry.example.invalid/ && npm publish --access public --provenance'],
+    ['quoted comment with registry override', 'npm publish --access public --provenance " #" --registry=https://registry.example.invalid/'],
+    ['empty artifact operand', 'npm publish --access public --provenance ""'],
+  ])('rejects a production %s', (_label, command) => {
+    const mutated = replaceLast(
+      workflow,
+      'npm publish --access public --provenance',
+      command,
+    );
+    expect(runGuard(mutated).stderr).toContain('production publication command must be exactly');
   });
 
   it('exports a parser that rejects ambiguous workflow steps', () => {
@@ -143,7 +204,8 @@ describe('npm publication guard', () => {
 
 describe('publication guard hardening', () => {
   it('rejects a lookalike registry URL', () => {
-    const mutated = workflow.replace(
+    const mutated = replaceLast(
+      workflow,
       'https://registry.npmjs.org/',
       'https://registryXnpmjsYorg/',
     );

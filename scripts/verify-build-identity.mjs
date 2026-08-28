@@ -31,6 +31,10 @@ for (const [format, module] of [['esm', esm], ['cjs', cjs]]) {
 
 for (const artifact of ['../dist/index.js', '../dist/index.cjs']) {
   const source = readFileSync(new URL(artifact, import.meta.url), 'utf8');
+  const consumerVersionMarker = `AGENT_HOOKS_VERSION = ${JSON.stringify(packageIdentity.version)}`;
+  if (!source.includes(consumerVersionMarker)) {
+    throw new Error(`${artifact} did not embed package.json's consumer telemetry version`);
+  }
   if (source.includes('process.env[key]') || source.includes('SIGIL_PACKAGE_NAME') || source.includes('SIGIL_PACKAGE_VERSION')) {
     throw new Error(`${artifact} retained runtime-selectable package identity access`);
   }
