@@ -2,6 +2,16 @@
 
 export { checkIntent } from './interceptor.js';
 export {
+  SIGIL_CLIENT_HEADER,
+  SIGIL_CLIENT_HEADER_GRAMMAR,
+  SIGIL_CLIENT_HEADER_MAX_BYTES,
+  SIGIL_SERVICE_COMMIT_HEADER,
+  SigilClientIdentifier,
+  SigilClientIdentifierError,
+  resolveClientIdentifier,
+} from './client-identifier.js';
+export type { SigilClientIdentity } from './client-identifier.js';
+export {
   authorizationPermitsExecution,
   isTransportFailOpenAuthorization,
   normalizeDecisionLiteral,

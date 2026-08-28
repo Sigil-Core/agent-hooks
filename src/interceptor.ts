@@ -1,5 +1,10 @@
 // src/interceptor.ts
 import {
+  SIGIL_CLIENT_HEADER,
+  SIGIL_SERVICE_COMMIT_HEADER,
+  resolveClientIdentifier,
+} from './client-identifier.js';
+import {
   createTransportFailOpenAuthorization,
   logDecisionVerification,
   normalizeDecisionLiteral,
@@ -26,8 +31,8 @@ const STRICT_RESPONSE_BODY_CAP_BYTES = 64 * 1024;
 const STRICT_RESPONSE_BODY_DEADLINE_MS = 1500;
 
 type AuthorizationHttpResult =
-  | { data: Record<string, unknown> }
-  | { result: SigilHookResult };
+  | { data: Record<string, unknown>; serviceCommit?: string }
+  | { result: SigilHookResult; serviceCommit?: string };
 
 interface AuthorizationRequestResult {
   response: AuthorizationHttpResult;
@@ -45,6 +50,18 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const getString = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : undefined;
+
+/**
+ * Reads Sign's build commit off a reached response. Observability only: the
+ * value is untrusted response metadata echoed back for support triage. It is
+ * never validated, never parsed, and never consulted for authorization, rate
+ * limiting, policy selection, retries, or trust, so reading it cannot change a
+ * decision. A missing or empty header is simply absent.
+ */
+const readServiceCommit = (response: Response): string | undefined => {
+  const value = response.headers.get(SIGIL_SERVICE_COMMIT_HEADER);
+  return value !== null && value.length > 0 ? value : undefined;
+};
 
 const OPTIONAL_STRING_FIELDS = [
   'policyHash',
@@ -103,7 +120,7 @@ const hasValidOptionalStringFields = (
 
 const invalidAuthorizationResponse = (
   message = 'Authorization response failed schema validation.',
-): AuthorizationHttpResult => ({
+): { data: Record<string, unknown> } => ({
   data: {
     status: 'DENIED',
     error_code: SIGIL_RESPONSE_INVALID,
@@ -189,7 +206,7 @@ const hasCompleteResponsePolicyAuthorization = (
 
 const resolveAuthorizationData = (
   data: Record<string, unknown>,
-): AuthorizationHttpResult => {
+): { data: Record<string, unknown> } => {
   if (data['status'] === 'DENIED') return { data };
   if (!hasValidAuthorizationStatus(data['status'])) {
     return invalidAuthorizationResponse();
@@ -208,32 +225,40 @@ const resolveAuthorizationData = (
 
 const resolveForbiddenResponse = (
   data: Record<string, unknown> | undefined,
+  serviceCommit?: string,
 ): AuthorizationHttpResult => {
   if (data?.['status'] !== 'DENIED') {
-    return { result: authenticationFailure(403) };
+    return { result: authenticationFailure(403), serviceCommit };
   }
-  return resolveAuthorizationData(data);
+  return { ...resolveAuthorizationData(data), serviceCommit };
 };
 
 const resolveHttpResponse = async (
   response: Response,
 ): Promise<AuthorizationHttpResult> => {
+  const serviceCommit = readServiceCommit(response);
   if (response.status === 401) {
-    return { result: authenticationFailure(response.status) };
+    return { result: authenticationFailure(response.status), serviceCommit };
   }
   if (response.status !== 200 && response.status !== 403) {
-    return invalidAuthorizationResponse(
-      `Unexpected authorization response status ${response.status}.`,
-    );
+    return {
+      ...invalidAuthorizationResponse(
+        `Unexpected authorization response status ${response.status}.`,
+      ),
+      serviceCommit,
+    };
   }
   const data = await parseResponseData(response);
-  if (response.status === 403) return resolveForbiddenResponse(data);
+  if (response.status === 403) return resolveForbiddenResponse(data, serviceCommit);
   if (data === undefined) {
-    return invalidAuthorizationResponse(
-      'Authorization response was not a valid JSON object.',
-    );
+    return {
+      ...invalidAuthorizationResponse(
+        'Authorization response was not a valid JSON object.',
+      ),
+      serviceCommit,
+    };
   }
-  return resolveAuthorizationData(data);
+  return { ...resolveAuthorizationData(data), serviceCommit };
 };
 
 // --- strictResponse mode (selected by the Cowork adapter) -------------------
@@ -363,7 +388,7 @@ const strictProtocolDenial = (
 
 const resolveStrictParsedBody = (
   data: Record<string, unknown>,
-): AuthorizationHttpResult => {
+): { data: Record<string, unknown> } => {
   if (hasValidAuthorizationStatus(data['status']) &&
       normalizeDecisionLiteral(data['status']) === 'ALLOWED' &&
       isStrictValidAllowed(data)) {
@@ -386,8 +411,9 @@ const resolveStrictParsedBody = (
 const resolveStrictHttpResponse = async (
   response: Response,
 ): Promise<AuthorizationHttpResult> => {
+  const serviceCommit = readServiceCommit(response);
   if (response.status === 401) {
-    return { result: authenticationFailure(401) };
+    return { result: authenticationFailure(401), serviceCommit };
   }
   if (response.status === 429) {
     return {
@@ -395,6 +421,7 @@ const resolveStrictHttpResponse = async (
         SIGIL_RATE_LIMITED,
         'Sigil Sign rate limited the request (429). Denied fast rather than retried.',
       ),
+      serviceCommit,
     };
   }
   if (response.status !== 200 && response.status !== 403) {
@@ -403,18 +430,20 @@ const resolveStrictHttpResponse = async (
         SIGIL_RESPONSE_INVALID,
         `Unexpected authorization response status ${response.status}.`,
       ),
+      serviceCommit,
     };
   }
   const body = await readStrictResponseBody(response);
   if ('error' in body) {
     if (response.status === 403) {
-      return { result: authenticationFailure(403) };
+      return { result: authenticationFailure(403), serviceCommit };
     }
     return {
       data: strictProtocolDenial(
         SIGIL_RESPONSE_INVALID,
         `Authorization response body rejected (${body.error}).`,
       ),
+      serviceCommit,
     };
   }
   const parsed = readStrictJson(body.bytes, {
@@ -422,20 +451,23 @@ const resolveStrictHttpResponse = async (
   });
   if (!parsed.ok) {
     if (response.status === 403) {
-      return { result: authenticationFailure(403) };
+      return { result: authenticationFailure(403), serviceCommit };
     }
     return {
       data: strictProtocolDenial(
         SIGIL_RESPONSE_INVALID,
         `Authorization response rejected: ${parsed.message}`,
       ),
+      serviceCommit,
     };
   }
   if (response.status === 403) {
-    if (isStrictValidDenied(parsed.value)) return { data: parsed.value };
-    return { result: authenticationFailure(403) };
+    if (isStrictValidDenied(parsed.value)) {
+      return { data: parsed.value, serviceCommit };
+    }
+    return { result: authenticationFailure(403), serviceCommit };
   }
-  return resolveStrictParsedBody(parsed.value);
+  return { ...resolveStrictParsedBody(parsed.value), serviceCommit };
 };
 
 // --- end strictResponse mode ------------------------------------------------
@@ -503,6 +535,18 @@ const requestAuthorization = async (
   intent: SigilIntent,
   config: SigilHookConfig,
 ): Promise<AuthorizationRequestResult> => {
+  // Resolved before anything else so a malformed build identity throws before
+  // any network I/O and before a timer exists to leak. The client header is
+  // untrusted diagnostic metadata only: Sign never reads it for a decision, and
+  // this module never reads it back.
+  const clientIdentifier = resolveClientIdentifier();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${config.apiKey}`,
+  };
+  if (clientIdentifier !== undefined) {
+    headers[SIGIL_CLIENT_HEADER] = clientIdentifier.headerValue;
+  }
   const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
   const requestBody = buildAuthorizeRequestBody(intent, config);
   const body = `${JSON.stringify(requestBody, null, 2)}\n`;
@@ -540,10 +584,7 @@ const requestAuthorization = async (
   try {
     const requestInit: RequestInit = {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
+      headers,
       body,
       signal: controller.signal,
       // Bearer-bearing authorization requests never follow redirects. Manual
@@ -591,6 +632,7 @@ const getPolicyHash = (
 const approvedResult = (
   data: Record<string, unknown>,
   authorization: NonNullable<SigilHookResult['authorization']>,
+  serviceCommit?: string,
 ): SigilHookResult => {
   const compactJws = getAliasedString(
     data,
@@ -607,7 +649,7 @@ const approvedResult = (
     'compiled_policy_envelope_digest',
     'compiledPolicyEnvelopeDigest',
   );
-  return {
+  const result: SigilHookResult = {
     decision: 'ALLOWED',
     authorization,
     policyHash: getPolicyHash(data),
@@ -628,21 +670,24 @@ const approvedResult = (
         }
       : {}),
   };
+  return serviceCommit === undefined ? result : { ...result, serviceCommit };
 };
 
 const pendingResult = (
   data: Record<string, unknown>,
   intent: SigilIntent,
   config: SigilHookConfig,
+  serviceCommit?: string,
 ): SigilHookResult => {
   const holdId = getHoldId(data) as string;
   config.onPending?.(intent, holdId);
-  return {
+  const result: SigilHookResult = {
     decision: 'PENDING',
     holdId,
     policyHash: getPolicyHash(data),
     message: getString(data['message']),
   };
+  return serviceCommit === undefined ? result : { ...result, serviceCommit };
 };
 
 const denialMessage = (
@@ -663,6 +708,7 @@ const deniedResult = (
   data: Record<string, unknown>,
   intent: SigilIntent,
   config: SigilHookConfig,
+  serviceCommit?: string,
 ): SigilHookResult => {
   const taskId = resolveTaskId(intent, config);
   const errorCode = (getString(data['error_code'])
@@ -671,13 +717,14 @@ const deniedResult = (
   const baseMessage = getString(data['message']) ?? 'Action blocked by policy';
   const message = denialMessage(errorCode, baseMessage, taskId);
   config.onDenied?.(intent, message);
-  return {
+  const result: SigilHookResult = {
     decision: 'DENIED',
     errorCode,
     message,
     policyHash: getPolicyHash(data),
     taskId,
   };
+  return serviceCommit === undefined ? result : { ...result, serviceCommit };
 };
 
 const mapAuthorizationData = async (
@@ -685,16 +732,17 @@ const mapAuthorizationData = async (
   intent: SigilIntent,
   config: SigilHookConfig,
   verificationContext: AuthorizationVerificationContext,
+  serviceCommit?: string,
 ): Promise<SigilHookResult> => {
   const verified = await verifyAuthorizationResponse(data, verificationContext);
   if (verified.reason !== undefined) {
     logDecisionVerification(verified.reason, verificationContext.mode, verificationContext.surface);
   }
   if (verified.decision === 'ALLOWED' && verified.authorization !== undefined) {
-    return approvedResult(data, verified.authorization);
+    return approvedResult(data, verified.authorization, serviceCommit);
   }
   if (verified.decision === 'PENDING') {
-    return pendingResult(data, intent, config);
+    return pendingResult(data, intent, config, serviceCommit);
   }
   if (
     hasValidAuthorizationStatus(data['status']) &&
@@ -705,9 +753,9 @@ const mapAuthorizationData = async (
       error_code: 'SIGIL_DECISION_VERIFICATION_FAILED',
       message: `Authorization response verification failed (${verified.reason ?? 'malformed'}).`,
       policy_hash: getPolicyHash(data),
-    }, intent, config);
+    }, intent, config, serviceCommit);
   }
-  return deniedResult(data, intent, config);
+  return deniedResult(data, intent, config, serviceCommit);
 };
 
 export const checkIntent = async (
@@ -723,13 +771,18 @@ export const checkIntent = async (
     }, intent, config);
   }
   const request = await requestAuthorization(intent, config);
-  if ('result' in request.response) return request.response.result;
+  if ('result' in request.response) {
+    return request.response.serviceCommit === undefined
+      ? request.response.result
+      : { ...request.response.result, serviceCommit: request.response.serviceCommit };
+  }
   try {
     return await mapAuthorizationData(
       request.response.data,
       intent,
       config,
       request.verificationContext,
+      request.response.serviceCommit,
     );
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));

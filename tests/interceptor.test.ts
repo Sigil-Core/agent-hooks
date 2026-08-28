@@ -660,6 +660,12 @@ describe('checkIntent', () => {
       }),
     );
 
+    const requestHeaders = (vi.mocked(fetch).mock.calls[0][1] as RequestInit)
+      .headers as Record<string, string>;
+    // Without a build-injected package identity there is no client header at
+    // all, never a partial or placeholder one.
+    expect(requestHeaders['X-Sigil-Client']).toBeUndefined();
+
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
     expect(body.framework).toBe('agent-hooks');
     expect(body.agentId).toBe('my-agent');
