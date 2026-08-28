@@ -596,6 +596,39 @@ the same entry point from an isolated exact `@sigilcore/agent-hooks@0.10.0`
 installation in both ESM and CommonJS and bind the npm artifact, release tag,
 and source commit.
 
+## Request and response observability headers
+
+Two headers carry build identity for support triage. Both are observability
+metadata only: neither is an input to any authorization, rate-limiting,
+policy-selection, retry, or trust decision, and neither changes the bytes Sign
+evaluates for a request.
+
+`X-Sigil-Client` is sent on every `/v1/authorize` request:
+
+```
+name=<package>; version=<semver>; commit=<40-hex>
+```
+
+Keys are always in that order, separated by exactly `; `, values are bare
+tokens, and the whole value is capped at 256 bytes. It is built from the package
+identity at build time, so the reported commit is the commit the publish
+workflow resolved for this exact artifact — never a value discovered from git or
+the filesystem at runtime. When the workflow produced no commit, `commit` is
+omitted entirely; no placeholder value is ever sent. A value that violates the
+grammar cannot be built: the identifier's constructor validates before anything
+is emitted, so a malformed identity fails the build and throws before any
+network call rather than sending a bad header.
+
+`X-Sigil-Service-Commit` is read off Sign's response and returned as
+`result.serviceCommit` on approved, denied, and held results. It is untrusted
+response metadata: never validated, never an enforcement input, and absent when
+Sign did not send it. A server that does not send the header and a client that
+sends no client header remain fully compatible in both directions.
+
+`SIGIL_CLIENT_HEADER`, `SIGIL_SERVICE_COMMIT_HEADER`, `SIGIL_CLIENT_HEADER_MAX_BYTES`,
+and `SIGIL_CLIENT_HEADER_GRAMMAR` are exported, along with the
+`SigilClientIdentifier` that produces the value.
+
 ## Fail Modes
 
 When no HTTP response is received from Sigil Sign, such as a network partition,

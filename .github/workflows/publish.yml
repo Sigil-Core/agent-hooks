@@ -17,9 +17,15 @@ jobs:
       name: npm-production
     runs-on: ubuntu-latest
     steps:
+      # Full history and every tag, so the release commit can be peeled and
+      # proven to be an ancestor of origin/main. A shallow checkout would leave
+      # the ancestry check unable to resolve origin/main, and the resolver fails
+      # closed on that rather than publishing anyway.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
@@ -27,6 +33,22 @@ jobs:
           registry-url: https://registry.npmjs.org/
 
       - run: npm install -g npm@11.17.0
+
+      # Resolves the commit that the published artifact will report on
+      # X-Sigil-Client: peels annotated tags to their commit, requires that
+      # commit to be an ancestor of origin/main, and fails closed otherwise.
+      # Works for both a tag ref (the release event) and a branch ref (manual
+      # dispatch). The annotated tag object SHA is never emitted.
+      - name: Resolve published source commit
+        id: source_commit
+        run: |
+          set -euo pipefail
+          commit="$(node scripts/resolve-source-commit.mjs)"
+          if [ -z "${commit}" ]; then
+            echo "resolve-source-commit: produced no commit" >&2
+            exit 1
+          fi
+          echo "source_commit=${commit}" >> "${GITHUB_OUTPUT}"
 
       - run: npm ci
 
@@ -37,6 +59,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+        env:
+          SIGIL_SOURCE_COMMIT: ${{ steps.source_commit.outputs.source_commit }}
 
       - name: Skip already published version
         id: published

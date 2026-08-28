@@ -21,6 +21,20 @@ Two external controls back that name.
 Publication is release-gated, so neither of these blocks a merge; a mismatch
 surfaces on the next published release, not on the default branch.
 
+## Published source commit
+
+The publish job checks out full history and every tag, then resolves one commit
+before it builds. `scripts/resolve-source-commit.mjs` peels the release ref with
+`^{commit}`, so an annotated tag yields the commit it points at and the tag
+object SHA is never emitted; the same peel covers a branch trigger, where an
+event can report a tag object as the commit. It then requires that commit to be
+an ancestor of `origin/main`, requires the checked-out tree to be that commit,
+and fails closed on every other outcome — including a checkout with no
+`origin/main` to compare against. The resolved commit is injected into the build
+as `SIGIL_SOURCE_COMMIT` and is what the published artifact reports on
+`X-Sigil-Client`. A local or fork build with no such value omits `commit`
+instead of guessing.
+
 ## Staged probe acceptance
 
 **This repository's `publish.yml` contains exactly one job, the release-gated

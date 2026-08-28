@@ -24,7 +24,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/verify-build-identity.mjs",
     "test": "vitest run",
     "test:cjs-runtime": "node scripts/verify-cjs-warrant-runtime.mjs",
     "test:watch": "vitest",

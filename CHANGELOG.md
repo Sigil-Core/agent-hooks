@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Observability-only build identity on every authorize request.
+  `X-Sigil-Client` carries the fixed grammar
+  `name=<package>; version=<semver>; commit=<40-hex>`, keys in that order, exact
+  `; ` separators, bare values, and a 256-byte cap. `commit` is omitted entirely
+  when the publish workflow produced none; no placeholder is ever sent. The
+  validating constructor throws before any network call, so a malformed
+  identity cannot be emitted.
+- `result.serviceCommit`, read from Sign's `X-Sigil-Service-Commit` response
+  header on approved, denied, and held results. Observability only: untrusted,
+  unvalidated, absent when Sign does not send it, and never an input to
+  authorization, rate limiting, policy selection, retries, or trust.
+- The publish job now checks out full history and every tag and resolves the
+  published source commit before building: annotated tags are peeled to their
+  commit, the annotated tag object SHA is never emitted, the commit must be an
+  ancestor of `origin/main` and must be the checked-out tree, and every other
+  outcome fails closed.
+
 ## [0.10.0] - 2026-08-21
 
 ### Added

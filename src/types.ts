@@ -184,6 +184,15 @@ export interface SigilHookResult {
   responsePolicy?: SigilResponsePolicyAuthorization;
   // Resolved task id used for this authorization check.
   taskId?: string;
+  /**
+   * Observability only. Sign's own build commit, read from the
+   * `X-Sigil-Service-Commit` response header when Sign sent one, on both
+   * approved and denied results. The value is untrusted response metadata:
+   * never validated, never an authorization, rate-limit, policy-selection,
+   * retry, or trust input, and absent (not a placeholder) when Sign did not
+   * send the header.
+   */
+  serviceCommit?: string;
   failOpen?: boolean;      // true when ALLOWED was returned via fail-open (not real policy evaluation)
 }
 
