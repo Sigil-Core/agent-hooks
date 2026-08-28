@@ -592,7 +592,7 @@ be zero. `npm run decision:gate`,
 blocking controls.
 
 This local source preflight is not registry evidence. Release evidence must run
-the same entry point from an isolated exact `@sigilcore/agent-hooks@0.10.0`
+the same entry point from an isolated exact `@sigilcore/agent-hooks@0.10.1`
 installation in both ESM and CommonJS and bind the npm artifact, release tag,
 and source commit.
 

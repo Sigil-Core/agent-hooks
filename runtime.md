@@ -15,7 +15,9 @@ The workflow must keep these properties aligned:
 - `package.json` repository URL:
   `git+https://github.com/Sigil-Core/agent-hooks.git`
 - GitHub environment: `npm-production`
-- Publish command: `npm publish --access public --provenance`
+- Staged command:
+  `npm stage publish --access public --provenance --tag fleet-phase6`
+- Release command: `npm publish --access public --provenance`
 
 The workflow does not need an `NPM_TOKEN` repository secret when trusted
 publishing is configured. `gh secret list --repo Sigil-Core/agent-hooks`
@@ -24,10 +26,12 @@ workflow is only effective after a protected GitHub `npm-production`
 environment and the matching npm trusted-publisher environment are configured.
 That external rollout prerequisite is intentionally not performed here.
 
-The production acceptance and staged P-12 probe rules are in
-[`docs/publishing.md`](docs/publishing.md). In particular, the probe retains
-its bootstrap rollback tag and permits one `latest` repoint only after exact
-staged approval. It never requires deleting the sole `latest` release.
+The Phase 6 staged acceptance and rollback rules are in
+[`docs/publishing.md`](docs/publishing.md). The same production package and
+trusted publisher are used throughout. After exact staged approval, the
+`fleet-phase6` tag is moved to the prior version to rehearse rollback, restored
+to the approved candidate, and then `latest` may move. No version or sole
+`latest` release is deleted.
 
 ## Known failure mode
 

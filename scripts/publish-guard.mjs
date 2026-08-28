@@ -46,6 +46,10 @@ const repositoryRoot = resolve(scriptDirectory, '..');
 const expectedRepositoryUrl = 'git+https://github.com/Sigil-Core/agent-hooks.git';
 const expectedRegistryUrl = 'https://registry.npmjs.org/';
 const expectedEnvironment = 'npm-production';
+const expectedStagedTag = 'fleet-phase6';
+const expectedProductionCommand = 'npm publish --access public --provenance';
+const expectedStagedCommand =
+  `npm stage publish --access public --provenance --tag ${expectedStagedTag}`;
 const releaseCondition = "github.event_name == 'release'";
 const dispatchCondition = "github.event_name == 'workflow_dispatch'";
 
@@ -69,10 +73,6 @@ export function normalizeShellCommand(command) {
   return command.replace(/\\(\w)/g, '$1').replace(/['"]/g, '');
 }
 
-function stripShellComment(command) {
-  return command.replace(/(^|\s)#.*$/, '$1').trim();
-}
-
 /** Split a `run:` body into individual shell commands. */
 export function shellCommands(run) {
   if (typeof run !== 'string') {
@@ -81,7 +81,10 @@ export function shellCommands(run) {
   return run
     .replace(/\\\s*\n/g, ' ')
     .split(/\r?\n|&&|\|\||;/)
-    .map(stripShellComment)
+    // Keep comments and quoting in the candidate. The publication boundary
+    // requires one literal command, so discarding either before the exact
+    // comparison could hide an operand or registry override.
+    .map((command) => command.trim())
     .filter(Boolean);
 }
 
@@ -108,6 +111,8 @@ export function publicationCommands(run) {
       // The normalised form is what every downstream flag assertion reads, so
       // an escaped spelling cannot hide a missing --provenance either.
       command: command.slice(start).trim(),
+      rawShellCommand: raw.trim(),
+      shellCommand: command.trim(),
       kind: staged ? 'stage' : 'direct',
     });
   }
@@ -147,7 +152,13 @@ function stepsOf(job, jobId) {
 
 /** Every publication command in a job, across all of its steps. */
 function publicationsOf(job, jobId) {
-  return stepsOf(job, jobId).flatMap((step) => publicationCommands(step?.run));
+  return stepsOf(job, jobId).flatMap((step) => {
+    const stepCommandCount = shellCommands(step?.run).length;
+    return publicationCommands(step?.run).map((publication) => ({
+      ...publication,
+      stepCommandCount,
+    }));
+  });
 }
 
 /** The `with.registry-url` of the setup-node step, resolved not matched. */
@@ -275,6 +286,12 @@ export function validatePublishContract({ workflowSource, packageJson }) {
     requestsProvenance(productionPublication.command),
     'production publish must request provenance',
   );
+  assert(
+    productionPublication.stepCommandCount === 1
+      && productionPublication.rawShellCommand === expectedProductionCommand
+      && productionPublication.shellCommand === expectedProductionCommand,
+    `production publication command must be exactly ${expectedProductionCommand}`,
+  );
 
   // A job is manual only when its condition permits workflow_dispatch and
   // nothing else. A mixed condition is rejected rather than sorted into a
@@ -288,24 +305,70 @@ export function validatePublishContract({ workflowSource, packageJson }) {
     );
   }
 
-  const manualPublications = dispatchJobs.flatMap((job) => job.publications);
+  assert(
+    dispatchJobs.length === 1,
+    'workflow must define exactly one workflow_dispatch staged publication job',
+  );
+  const stagedJob = dispatchJobs[0];
+  assert(
+    stagedJob.runner === 'ubuntu-latest',
+    'workflow_dispatch publication must use GitHub-hosted ubuntu-latest',
+  );
+  assert(
+    stagedJob.environment === expectedEnvironment,
+    `workflow_dispatch publication must use the ${expectedEnvironment} environment`,
+  );
+  assert(
+    stagedJob.registryUrl === expectedRegistryUrl,
+    `workflow_dispatch publication must use registry ${expectedRegistryUrl}`,
+  );
+  const stagedPermissions = effectivePermissions(plan.raw, stagedJob.raw);
+  assert(
+    stagedPermissions['id-token'] === 'write',
+    'workflow_dispatch publication must be granted id-token: write',
+  );
+  assert(
+    stagedPermissions.contents === 'read',
+    'workflow_dispatch publication must be granted contents: read',
+  );
+  const stagedSteps = stepsOf(stagedJob.raw, stagedJob.id);
+  const stagedInstallIndex = stagedSteps.findIndex((step) => step.run?.trim() === 'npm ci');
+  const stagedGuardIndex = stagedSteps.findIndex(
+    (step) => step.run?.trim() === 'npm run publish:guard',
+  );
+  assert(
+    stagedInstallIndex !== -1 && stagedGuardIndex !== -1 && stagedInstallIndex < stagedGuardIndex,
+    'workflow_dispatch publication must run npm ci before npm run publish:guard',
+  );
+
+  const manualPublications = stagedJob.publications;
   assert(
     manualPublications.every((publication) => publication.kind === 'stage'),
     'workflow_dispatch publication must use npm stage publish',
   );
   assert(
-    manualPublications.length <= 1,
-    'workflow_dispatch must expose at most one staged publication command',
+    manualPublications.length === 1,
+    'workflow_dispatch must expose exactly one staged publication command',
   );
-  if (manualPublications.length === 1) {
-    const staged = manualPublications[0];
-    assert(requestsProvenance(staged.command), 'staged publication must request provenance');
-    assert(/--tag\s+([^\s]+)/.test(staged.command), 'staged publication must set a dist-tag');
-    assert(
-      !/(^|\s)--tag\s+latest(\s|$)/.test(staged.command),
-      'staged publication must not target latest',
-    );
-  }
+  const staged = manualPublications[0];
+  assert(
+    /(^|\s)--access\s+public(\s|$)/.test(staged.command),
+    'staged publication must set public access',
+  );
+  assert(requestsProvenance(staged.command), 'staged publication must request provenance');
+  const stagedTags = [
+    ...staged.command.matchAll(/(?:^|\s)--tag(?:=|\s+)([^\s]+)/g),
+  ].map((match) => match[1]);
+  assert(
+    stagedTags.length === 1 && stagedTags[0] === expectedStagedTag,
+    `staged publication must use exactly --tag ${expectedStagedTag}`,
+  );
+  assert(
+    staged.stepCommandCount === 1
+      && staged.rawShellCommand === expectedStagedCommand
+      && staged.shellCommand === expectedStagedCommand,
+    `staged publication command must be exactly ${expectedStagedCommand}`,
+  );
 
   // No job outside the production and dispatch sets may publish at all.
   const accounted = new Set([production.id, ...dispatchJobs.map((job) => job.id)]);

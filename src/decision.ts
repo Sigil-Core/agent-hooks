@@ -85,7 +85,10 @@ interface VerifiedToken extends ParsedJws {
   kid: string;
 }
 
-const AGENT_HOOKS_VERSION = '0.10.0';
+// tsup replaces this exact static property access with package.json's version.
+// Raw, unbundled source reports unavailable instead of carrying a hand-copied
+// version that can drift from the published artifact.
+const AGENT_HOOKS_VERSION = process.env.SIGIL_PACKAGE_VERSION || 'unavailable';
 const TOKEN_MAX_BYTES = 8 * 1024;
 const JWKS_MAX_BYTES = 64 * 1024;
 const JWKS_MAX_KEYS = 16;

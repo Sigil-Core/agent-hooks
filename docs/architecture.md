@@ -38,14 +38,18 @@ token. The trust chain is:
    configured before this is an effective human release gate.
 4. npm validates the trusted publisher configuration for
    `Sigil-Core/agent-hooks` and `publish.yml`.
-5. `npm publish --access public --provenance` publishes
-   `@sigilcore/agent-hooks` with a provenance attestation.
+5. The manual Phase 6 path submits the candidate with
+   `npm stage publish --access public --provenance --tag fleet-phase6`. The
+   release path uses `npm publish --access public --provenance` after staged
+   approval and rollback rehearsal.
 
-The P-12 probe is intentionally separate from production publication. Its
-manual workflow path may issue one `npm stage publish` command under a
-non-latest tag. The reusable `scripts/publish-guard.mjs` check rejects direct,
-duplicate, or hidden publication commands and keeps the bootstrap rollback tag
-available for acceptance and rollback.
+The manual path and release path publish the same production package through
+the same trusted publisher and protected `npm-production` environment. The
+reusable `scripts/publish-guard.mjs` check confines the manual job to the
+GitHub-hosted runner, public npm registry, exact `fleet-phase6` tag, public
+access, provenance, and staged-only publication. The tag is moved to the prior
+version for rollback rehearsal, restored to the approved candidate, and only
+then may `latest` move.
 
 **The guard parses the workflow; it does not match its text.** It reads the
 YAML into an object model and asserts against resolved values, so block
@@ -66,10 +70,9 @@ shell interpreter. Anyone who can merge a workflow change can defeat it; the
 control that matters against that threat is review of the workflow diff, which
 is why `.github/workflows/**` is a security-seam path.
 
-The production package has one npm trusted publisher. A temporary P-12 probe
-package needs a separate publisher record restricted to staged publication;
-its setup is an external rollout prerequisite and is not changed by this
-repository patch.
+The production package has one npm trusted publisher for this workflow. That
+publisher must allow both staged and direct publication; no temporary package,
+second publisher, or bootstrap tag is part of the Phase 6 design.
 
 The `repository.url` in `package.json` is part of that trust boundary and must
 remain `git+https://github.com/Sigil-Core/agent-hooks.git`.
