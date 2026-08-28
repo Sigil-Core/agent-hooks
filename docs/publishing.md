@@ -18,14 +18,14 @@ Two external controls back that name.
    restriction rather than a label. Until it is set, the environment is
    documentation, not a gate.
 
-Production publication is release-gated. The Phase 6 candidate path is a
-manual staged publication from the same workflow and environment. It makes the
+Production publication is stage-only. The Phase 6 candidate path is a manual
+staged publication from the protected workflow and environment. It makes the
 candidate unavailable to public installs until an operator completes npm's
-proof-of-presence approval.
+proof-of-presence approval. A GitHub release never publishes a package.
 
 ## Published source commit
 
-The publish job checks out full history and every tag, then resolves one commit
+The staged publish job checks out full history and every tag, then resolves one commit
 before it builds. `scripts/resolve-source-commit.mjs` peels the release ref with
 `^{commit}`, so an annotated tag yields the commit it points at and the tag
 object SHA is never emitted; the same peel covers a branch trigger, where an
@@ -52,8 +52,10 @@ escapes or quote characters. Its shell handling is deliberately bounded: it
 does not resolve variable expansion, command substitution, `eval`, or encoded
 payloads. See `docs/architecture.md` for the full boundary.
 
-The production package has one trusted npm publisher: this workflow for
-`Sigil-Core/agent-hooks`. No npm token is stored in GitHub.
+The production package has one stage-only trusted npm publisher: this workflow
+for `Sigil-Core/agent-hooks`. No npm token is stored in GitHub. The release job
+has no OIDC permission or publishing registry and fails unless the exact
+package version already exists with sha512 integrity and SLSA provenance.
 
 Acceptance is bound to the exact staged package name, version, tarball digest,
 repository metadata, provenance receipt, and reviewed workflow ref. Keep the
@@ -69,7 +71,7 @@ repoint.
 
 ## One-challenge rule
 
-Once the trusted publisher allows both direct and staged publication, the
+Once the trusted publisher allows staged publication only, the
 `npm-production` gate permits one challenge for an exact staged artifact.
 When the challenge is not satisfied, the run stops. A new artifact and a fresh
 staged review are required before another challenge or any `latest` repoint.

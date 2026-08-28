@@ -40,11 +40,11 @@ token. The trust chain is:
    `Sigil-Core/agent-hooks` and `publish.yml`.
 5. The manual Phase 6 path submits the candidate with
    `npm stage publish --access public --provenance --tag fleet-phase6`. The
-   release path uses `npm publish --access public --provenance` after staged
-   approval and rollback rehearsal.
+   release path only verifies that the approved version already exists with
+   registry integrity and SLSA provenance.
 
-The manual path and release path publish the same production package through
-the same trusted publisher and protected `npm-production` environment. The
+Only the manual path can publish the production package, through the stage-only
+trusted publisher and protected `npm-production` environment. The
 reusable `scripts/publish-guard.mjs` check confines the manual job to the
 GitHub-hosted runner, public npm registry, exact `fleet-phase6` tag, public
 access, provenance, and staged-only publication. The tag is moved to the prior
@@ -71,8 +71,9 @@ control that matters against that threat is review of the workflow diff, which
 is why `.github/workflows/**` is a security-seam path.
 
 The production package has one npm trusted publisher for this workflow. That
-publisher must allow both staged and direct publication; no temporary package,
-second publisher, or bootstrap tag is part of the Phase 6 design.
+publisher allows staged publication only; no temporary package, direct
+publication authority, second publisher, or bootstrap tag is part of the
+Phase 6 design.
 
 The `repository.url` in `package.json` is part of that trust boundary and must
 remain `git+https://github.com/Sigil-Core/agent-hooks.git`.

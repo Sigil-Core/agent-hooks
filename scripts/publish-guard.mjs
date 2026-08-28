@@ -45,11 +45,14 @@ const repositoryRoot = resolve(scriptDirectory, '..');
 
 const expectedRepositoryUrl = 'git+https://github.com/Sigil-Core/agent-hooks.git';
 const expectedRegistryUrl = 'https://registry.npmjs.org/';
+const expectedReleaseInstallCommand =
+  'npm install -g npm@11.17.0 --registry=https://registry.npmjs.org/';
+const expectedReleaseCiCommand = 'npm ci --registry=https://registry.npmjs.org/';
 const expectedEnvironment = 'npm-production';
 const expectedStagedTag = 'fleet-phase6';
-const expectedProductionCommand = 'npm publish --access public --provenance';
 const expectedStagedCommand =
   `npm stage publish --access public --provenance --tag ${expectedStagedTag}`;
+const expectedReleaseVerificationCommand = 'node scripts/verify-published-release.mjs';
 const releaseCondition = "github.event_name == 'release'";
 const dispatchCondition = "github.event_name == 'workflow_dispatch'";
 
@@ -239,58 +242,50 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   assert(!referencesToken(plan.raw, 'NPM_TOKEN'), 'workflow must not reference NPM_TOKEN');
 
   // Select the production job from the plan rather than assuming an id.
-  const production =
+  const release =
     plan.jobs.find((job) => job.if === releaseCondition) ??
-    plan.jobs.find((job) => job.id === 'publish' || job.id === 'production');
-  assert(production !== undefined, 'workflow must define a publish job');
-  assert(production.if === releaseCondition, 'publish job must be release-event only');
-  assert(production.runner === 'ubuntu-latest', 'publish job must use GitHub-hosted ubuntu-latest');
+    plan.jobs.find((job) => job.id === 'verify-release');
+  assert(release !== undefined, 'workflow must define a release verification job');
+  assert(release.if === releaseCondition, 'release verification job must be release-event only');
+  assert(release.runner === 'ubuntu-latest', 'release verification job must use GitHub-hosted ubuntu-latest');
   assert(
-    production.environment === expectedEnvironment,
-    `publish job must use the ${expectedEnvironment} environment`,
+    release.environment === undefined,
+    'release verification job must not use the publishing environment',
   );
 
-  const permissions = effectivePermissions(plan.raw, production.raw);
-  assert(permissions['id-token'] === 'write', 'publish job must be granted id-token: write');
-  assert(permissions.contents === 'read', 'publish job must be granted contents: read');
-
-  // Exact string comparison against the resolved value. No regex, so no
-  // escaping to get wrong and no lookalike host can satisfy it.
+  const releasePermissions = effectivePermissions(plan.raw, release.raw);
   assert(
-    production.registryUrl === expectedRegistryUrl,
-    `publish job must use registry ${expectedRegistryUrl}`,
+    releasePermissions['id-token'] !== 'write',
+    'release verification job must not receive id-token: write',
+  );
+  assert(releasePermissions.contents === 'read', 'release verification job must be granted contents: read');
+  assert(
+    release.registryUrl === undefined,
+    'release verification job must not configure a publishing registry',
   );
 
-  const productionSteps = stepsOf(production.raw, production.id);
-  const installIndex = productionSteps.findIndex((step) => step.run?.trim() === 'npm ci');
-  const guardIndex = productionSteps.findIndex(
+  const releaseSteps = stepsOf(release.raw, release.id);
+  const npmInstallIndex = releaseSteps.findIndex(
+    (step) => step.run?.trim() === expectedReleaseInstallCommand,
+  );
+  const installIndex = releaseSteps.findIndex(
+    (step) => step.run?.trim() === expectedReleaseCiCommand,
+  );
+  const guardIndex = releaseSteps.findIndex(
     (step) => step.run?.trim() === 'npm run publish:guard',
   );
   assert(
-    installIndex !== -1 && guardIndex !== -1 && installIndex < guardIndex,
-    'publish job must run npm ci before npm run publish:guard',
-  );
-
-  const productionPublications = production.publications;
-  assert(
-    productionPublications.length === 1,
-    `publish job must contain exactly one publication command, got ${productionPublications.length}`,
-  );
-  const productionPublication = productionPublications[0];
-  assert(productionPublication.kind === 'direct', 'production publish must use npm publish');
-  assert(
-    productionPublication.command.includes('--access public'),
-    'production publish must set public access',
+    npmInstallIndex !== -1 && installIndex !== -1
+      && guardIndex !== -1 && npmInstallIndex < installIndex && installIndex < guardIndex,
+    'release verification job must pin npm install and npm ci to the public registry before npm run publish:guard',
   );
   assert(
-    requestsProvenance(productionPublication.command),
-    'production publish must request provenance',
+    release.publications.length === 0,
+    'release verification job must not publish a package',
   );
   assert(
-    productionPublication.stepCommandCount === 1
-      && productionPublication.rawShellCommand === expectedProductionCommand
-      && productionPublication.shellCommand === expectedProductionCommand,
-    `production publication command must be exactly ${expectedProductionCommand}`,
+    releaseSteps.filter((step) => step.run?.trim() === expectedReleaseVerificationCommand).length === 1,
+    `release verification job must run exactly ${expectedReleaseVerificationCommand}`,
   );
 
   // A job is manual only when its condition permits workflow_dispatch and
@@ -332,13 +327,15 @@ export function validatePublishContract({ workflowSource, packageJson }) {
     'workflow_dispatch publication must be granted contents: read',
   );
   const stagedSteps = stepsOf(stagedJob.raw, stagedJob.id);
-  const stagedInstallIndex = stagedSteps.findIndex((step) => step.run?.trim() === 'npm ci');
+  const stagedInstallIndex = stagedSteps.findIndex(
+    (step) => step.run?.trim() === expectedReleaseCiCommand,
+  );
   const stagedGuardIndex = stagedSteps.findIndex(
     (step) => step.run?.trim() === 'npm run publish:guard',
   );
   assert(
     stagedInstallIndex !== -1 && stagedGuardIndex !== -1 && stagedInstallIndex < stagedGuardIndex,
-    'workflow_dispatch publication must run npm ci before npm run publish:guard',
+    'workflow_dispatch publication must run registry-pinned npm ci before npm run publish:guard',
   );
 
   const manualPublications = stagedJob.publications;
@@ -371,7 +368,7 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   );
 
   // No job outside the production and dispatch sets may publish at all.
-  const accounted = new Set([production.id, ...dispatchJobs.map((job) => job.id)]);
+  const accounted = new Set([release.id, ...dispatchJobs.map((job) => job.id)]);
   for (const job of plan.jobs) {
     if (accounted.has(job.id)) {
       continue;
@@ -383,8 +380,8 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   }
 
   return {
-    productionJob: production.id,
-    productionPublication: productionPublication.command,
+    releaseJob: release.id,
+    releaseVerification: expectedReleaseVerificationCommand,
     stagedPublications: manualPublications.map((publication) => publication.command),
   };
 }

@@ -41,10 +41,10 @@ function replaceLast(source: string, target: string, replacement: string) {
 }
 
 describe('npm publication guard', () => {
-  it('accepts the production trusted-publishing contract', () => {
+  it('accepts the stage-only trusted-publishing contract', () => {
     const result = runGuard();
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain('npm publish --access public --provenance');
+    expect(result.stdout).toContain('node scripts/verify-published-release.mjs');
     expect(packageJson.repository.url).toBe('git+https://github.com/Sigil-Core/agent-hooks.git');
     expect(packageJson.publishConfig.provenance).toBe(true);
   });
@@ -53,7 +53,7 @@ describe('npm publication guard', () => {
     const reversed = replaceLast(
       workflow,
       [
-        '      - run: npm ci',
+        '      - run: npm ci --registry=https://registry.npmjs.org/',
         '',
         '      - name: Verify trusted publication contract',
         '        run: npm run publish:guard',
@@ -62,7 +62,7 @@ describe('npm publication guard', () => {
         '      - name: Verify trusted publication contract',
         '        run: npm run publish:guard',
         '',
-        '      - run: npm ci',
+        '      - run: npm ci --registry=https://registry.npmjs.org/',
       ].join('\n'),
     );
     expect(reversed).not.toBe(workflow);
@@ -71,14 +71,14 @@ describe('npm publication guard', () => {
       '  decoy:',
       '    runs-on: ubuntu-latest',
       '    steps:',
-      '      - run: npm ci',
+      '      - run: npm ci --registry=https://registry.npmjs.org/',
       '      - run: npm run publish:guard',
       '',
     ].join('\n');
     const result = runGuard(`${reversed}${decoyJob}`);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('publish job must run npm ci before npm run publish:guard');
+    expect(result.stderr).toContain('must pin npm install and npm ci to the public registry');
   });
 
   it('documents the publication contract', () => {
@@ -107,18 +107,18 @@ describe('npm publication guard', () => {
 
   it('rejects duplicate and hidden publication commands', () => {
     const duplicate = workflow.replace(
-      '      - name: Publish to npm',
-      '      - name: Duplicate publication\n        run: npm publish --access public --provenance\n\n      - name: Publish to npm',
+      '      - name: Stage reviewed package under the Phase 6 tag',
+      '      - name: Duplicate publication\n        run: npm stage publish --access public --provenance --tag fleet-phase6\n\n      - name: Stage reviewed package under the Phase 6 tag',
     );
-    expect(runGuard(duplicate).stderr).toContain('exactly one publication command');
+    expect(runGuard(duplicate).stderr).toContain('exactly one staged publication command');
 
     const hidden = workflow.replace(
-      '      - name: Publish to npm',
+      '      - name: Stage reviewed package under the Phase 6 tag',
       '      - name: Hidden duplicate publication\n' +
         '        run: if false; then npm publish --access public --provenance; fi\n\n' +
-        '      - name: Publish to npm',
+        '      - name: Stage reviewed package under the Phase 6 tag',
     );
-    expect(runGuard(hidden).stderr).toContain('exactly one publication command');
+    expect(runGuard(hidden).stderr).toContain('must use npm stage publish');
   });
 
   it('rejects a staged command that targets latest', () => {
@@ -172,22 +172,12 @@ describe('npm publication guard', () => {
     expect(runGuard(mutated).stderr).toContain('staged publication command must be exactly');
   });
 
-  it.each([
-    ['registry override', 'npm publish --registry=https://registry.example.invalid/ --access public --provenance'],
-    ['artifact operand', 'npm publish artifact.tgz --access public --provenance'],
-    ['dry run', 'npm publish --access public --provenance --dry-run'],
-    ['duplicate access', 'npm publish --access public --provenance --access restricted'],
-    ['registry environment prefix', 'NPM_CONFIG_REGISTRY=https://registry.example.invalid/ npm publish --access public --provenance'],
-    ['registry config prefix', 'npm config set registry https://registry.example.invalid/ && npm publish --access public --provenance'],
-    ['quoted comment with registry override', 'npm publish --access public --provenance " #" --registry=https://registry.example.invalid/'],
-    ['empty artifact operand', 'npm publish --access public --provenance ""'],
-  ])('rejects a production %s', (_label, command) => {
-    const mutated = replaceLast(
-      workflow,
+  it('rejects direct publication from the release job', () => {
+    const mutated = workflow.replace(
+      'node scripts/verify-published-release.mjs',
       'npm publish --access public --provenance',
-      command,
     );
-    expect(runGuard(mutated).stderr).toContain('production publication command must be exactly');
+    expect(runGuard(mutated).stderr).toContain('release verification job must not publish');
   });
 
   it('exports a parser that rejects ambiguous workflow steps', () => {
@@ -222,16 +212,19 @@ describe('publication guard hardening', () => {
     ['shell-quoted', '\'"npm" publish --access public\''],
     ['split-quoted', '\'np\'\'\'\'m publish --access public\''],
   ])('detects a %s publication verb', (_label, spelling) => {
-    const mutated = workflow.replace('npm publish --access public --provenance', spelling);
+    const mutated = workflow.replace(
+      'node scripts/verify-published-release.mjs',
+      `node scripts/verify-published-release.mjs; ${spelling}`,
+    );
     const result = runGuard(mutated);
     expect(result.status, result.stdout).not.toBe(0);
-    expect(`${result.stderr}${result.stdout}`).toContain('provenance');
+    expect(`${result.stderr}${result.stdout}`).toContain('release verification job must not publish');
   });
 
   it('rejects provenance explicitly disabled', () => {
     const mutated = workflow.replace(
-      'npm publish --access public --provenance',
-      'npm publish --access public --provenance=false',
+      'npm stage publish --access public --provenance --tag fleet-phase6',
+      'npm stage publish --access public --provenance=false --tag fleet-phase6',
     );
     const result = runGuard(mutated);
     expect(result.status, result.stdout).not.toBe(0);
@@ -253,10 +246,11 @@ describe('publication guard hardening', () => {
     expect(`${result.stderr}${result.stdout}`).toContain('workflow_dispatch');
   });
 
-  it('rejects id-token granted to another job but not to publish', () => {
-    const mutated = workflow
-      .replace(/^permissions:\n(?: {2}.*\n)+/m, '')
-      .replace(/^ {2}publish:\n/m, '  publish:\n    permissions:\n      contents: read\n');
+  it('rejects a staged job without id-token permission', () => {
+    const mutated = workflow.replace(
+      ['    permissions:', '      contents: read', '      id-token: write'].join('\n'),
+      ['    permissions:', '      contents: read'].join('\n'),
+    );
     const result = runGuard(mutated);
     expect(result.status, result.stdout).not.toBe(0);
     expect(`${result.stderr}${result.stdout}`).toContain('id-token');
@@ -282,8 +276,8 @@ describe('publication guard parses structure, not text', () => {
     // The hand-rolled reader could not follow a block scalar, so a publish
     // command written this way was invisible to the guard entirely.
     const mutated = workflow.replace(
-      '        run: npm publish --access public --provenance',
-      ['        run: |', '          npm publish --access public'].join('\n'),
+      '        run: npm stage publish --access public --provenance --tag fleet-phase6',
+      ['        run: |', '          npm stage publish --access public --tag fleet-phase6'].join('\n'),
     );
     const result = runGuard(mutated);
     expect(result.status, result.stdout).not.toBe(0);
@@ -292,8 +286,8 @@ describe('publication guard parses structure, not text', () => {
 
   it('reads inline-mapping permissions', () => {
     const mutated = workflow.replace(
-      /^permissions:\n(?: {2}.*\n)+/m,
-      'permissions: { contents: read, id-token: write }\n',
+      ['    permissions:', '      contents: read', '      id-token: write'].join('\n'),
+      '    permissions: { contents: read, id-token: write }',
     );
     const result = runGuard(mutated);
     expect(result.status, `${result.stderr}${result.stdout}`).toBe(0);
