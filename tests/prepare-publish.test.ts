@@ -44,7 +44,7 @@ describe('prepare exact publication artifact', () => {
   });
 
   it('publishes only when the exact version is absent', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(response({}, 404));
+    const fetchImpl = vi.fn().mockResolvedValue(response({ versions: {} }));
     const artifact = {
       name: packageJson.name,
       version: packageJson.version,
@@ -56,6 +56,30 @@ describe('prepare exact publication artifact', () => {
     await expect(determinePublication(packageJson, artifact, { fetchImpl })).resolves.toMatchObject({
       publishRequired: true,
     });
+  });
+
+  it('fails closed after bounded transient package-document 404s', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(response({}, 404));
+    const artifact = {
+      name: packageJson.name,
+      version: packageJson.version,
+      tarball: '/tmp/package.tgz',
+      size: 1,
+      shasum: 'a'.repeat(40),
+      integrity: `sha512-${Buffer.alloc(64, 7).toString('base64')}`,
+    };
+    let clock = 0;
+    await expect(determinePublication(packageJson, artifact, {
+      fetchImpl,
+      now: () => clock,
+      sleep: (milliseconds: number) => {
+        clock += milliseconds;
+        return Promise.resolve();
+      },
+      deadlineMs: 5,
+      retryDelayMs: 2,
+    })).rejects.toThrow(/package availability check exceeded 5 ms/);
+    expect(fetchImpl.mock.calls.length).toBeLessThanOrEqual(3);
   });
 
   it('skips publication only for an exact existing release', async () => {

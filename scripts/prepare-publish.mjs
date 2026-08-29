@@ -6,8 +6,11 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { env } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import {
+  REQUEST_TIMEOUT_MS,
+  RETRY_DELAY_MS,
   RegistryRequestError,
   ReleaseVerificationError,
+  VERIFY_DEADLINE_MS,
   readPackageDocument,
   verifyPublishedRelease,
   verifyRegistryWithRetry,
@@ -17,6 +20,39 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..');
 
 export class PreparePublishError extends Error {}
+
+async function readPackageDocumentWithRetry(
+  packageJson,
+  {
+    fetchImpl = fetch,
+    now = () => performance.now(),
+    sleep = (milliseconds) => new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)),
+    requestTimeoutMs = REQUEST_TIMEOUT_MS,
+    deadlineMs = VERIFY_DEADLINE_MS,
+    retryDelayMs = RETRY_DELAY_MS,
+  } = {},
+) {
+  const startedAt = now();
+  let lastError = new RegistryRequestError('no successful response', { transient: true });
+  while (now() - startedAt < deadlineMs) {
+    const remaining = deadlineMs - (now() - startedAt);
+    try {
+      return await readPackageDocument(packageJson, {
+        fetchImpl,
+        timeoutMs: Math.min(requestTimeoutMs, remaining),
+      });
+    } catch (error) {
+      if (!(error instanceof RegistryRequestError) || !error.transient) throw error;
+      lastError = error;
+      const afterAttempt = deadlineMs - (now() - startedAt);
+      if (afterAttempt <= 0) break;
+      await sleep(Math.min(retryDelayMs, afterAttempt));
+    }
+  }
+  throw new PreparePublishError(
+    `package availability check exceeded ${deadlineMs} ms: ${lastError.message}`,
+  );
+}
 
 export function buildArtifactManifest(packageJson, tarballPath) {
   const bytes = readFileSync(tarballPath);
@@ -60,30 +96,23 @@ export function packArtifact(
 }
 
 export async function determinePublication(packageJson, artifact, options = {}) {
-  try {
-    const packageDocument = await readPackageDocument(packageJson, options);
-    const metadata = packageDocument?.versions?.[packageJson.version];
-    if (metadata === undefined) {
-      return { publishRequired: true, reason: 'version is absent from npm' };
-    }
-    try {
-      verifyPublishedRelease(
-        packageJson,
-        metadata,
-        artifact,
-        packageDocument?.['dist-tags']?.latest,
-      );
-    } catch (error) {
-      if (!(error instanceof ReleaseVerificationError) || !error.retryable) throw error;
-      await verifyRegistryWithRetry(packageJson, artifact, options);
-    }
-    return { publishRequired: false, reason: 'exact release already exists' };
-  } catch (error) {
-    if (error instanceof RegistryRequestError && error.status === 404) {
-      return { publishRequired: true, reason: 'version is absent from npm' };
-    }
-    throw error;
+  const packageDocument = await readPackageDocumentWithRetry(packageJson, options);
+  const metadata = packageDocument?.versions?.[packageJson.version];
+  if (metadata === undefined) {
+    return { publishRequired: true, reason: 'version is absent from npm' };
   }
+  try {
+    verifyPublishedRelease(
+      packageJson,
+      metadata,
+      artifact,
+      packageDocument?.['dist-tags']?.latest,
+    );
+  } catch (error) {
+    if (!(error instanceof ReleaseVerificationError) || !error.retryable) throw error;
+    await verifyRegistryWithRetry(packageJson, artifact, options);
+  }
+  return { publishRequired: false, reason: 'exact release already exists' };
 }
 
 function githubOutputValue(value) {
