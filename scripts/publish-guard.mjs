@@ -164,6 +164,11 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   assert(job.raw?.['continue-on-error'] !== true, 'publish job must not continue on error');
   const environment = typeof job.raw?.environment === 'string' ? job.raw.environment : job.raw?.environment?.name;
   assert(environment === EXPECTED_ENVIRONMENT, `publish job must use the ${EXPECTED_ENVIRONMENT} environment`);
+  assert(
+    !Object.hasOwn(plan.raw?.defaults?.run ?? {}, 'shell')
+      && !Object.hasOwn(job.raw?.defaults?.run ?? {}, 'shell'),
+    'release workflow and job must not override the run shell',
+  );
 
   const permissions = effectivePermissions(plan.raw, job.raw);
   assert(
@@ -177,6 +182,10 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   assert(
     steps.every((step) => step?.['continue-on-error'] !== true),
     'publish steps must not continue on error',
+  );
+  assert(
+    steps.every((step) => !Object.hasOwn(step ?? {}, 'shell')),
+    'release steps must not override the run shell',
   );
   const checkout = usesStep(steps, 'actions/checkout@');
   assert(checkout !== undefined, 'publish job must check out the release tag');
@@ -236,7 +245,10 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   const publication = publications[0];
   assert(publication.rawShellCommand === EXPECTED_PUBLISH, `publication command must be exactly ${EXPECTED_PUBLISH}`);
   assert(publication.step?.if === EXPECTED_PUBLISH_CONDITION, 'publication must run only when prepare requests it');
-  assert(publication.stepIndex > prepareIndex && publication.stepIndex < verifyIndex, 'publication must run between prepare and verification');
+  assert(
+    publication.stepIndex === prepareIndex + 1 && verifyIndex === publication.stepIndex + 1,
+    'prepare, publication, and verification steps must be adjacent',
+  );
   assert(requestsProvenance(publication.command), 'publication must request provenance');
   assert(/(^|\s)--access\s+public(\s|$)/.test(publication.command), 'publication must set public access');
   assert(/(^|\s)--tag\s+latest(\s|$)/.test(publication.command), 'publication must use the latest tag');

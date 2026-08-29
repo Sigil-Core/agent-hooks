@@ -108,6 +108,26 @@ describe('direct OIDC publication guard', () => {
     );
   });
 
+  it('rejects workflow, job, and step shell overrides', () => {
+    const workflowDefault = workflow.replace(
+      'permissions:\n  contents: read',
+      'defaults:\n  run:\n    shell: /bin/true {0}\n\npermissions:\n  contents: read',
+    );
+    expect(runGuard(workflowDefault).stderr).toContain('must not override the run shell');
+
+    const jobDefault = workflow.replace(
+      '    runs-on: ubuntu-latest',
+      '    defaults:\n      run:\n        shell: /bin/true {0}\n    runs-on: ubuntu-latest',
+    );
+    expect(runGuard(jobDefault).stderr).toContain('must not override the run shell');
+
+    const stepOverride = workflow.replace(
+      '      - run: npm test',
+      '      - run: npm test\n        shell: /bin/true {0}',
+    );
+    expect(runGuard(stepOverride).stderr).toContain('steps must not override the run shell');
+  });
+
   it('binds checkout and build identity to the release tag', () => {
     const wrongRef = workflow.replace('ref: ' + githubExpression('github.event.release.tag_name'), 'ref: main'); // skipcq: JS-0246 - The fixture must contain literal GitHub syntax.
     expect(runGuard(wrongRef).stderr).toContain('release.tag_name');
@@ -174,6 +194,17 @@ describe('direct OIDC publication guard', () => {
 
     const unconditional = workflow.replace("if: steps.release.outputs.publish_required == 'true'", 'if: always()');
     expect(runGuard(unconditional).stderr).toContain('only when prepare requests it');
+  });
+
+  it('rejects a step interposed after artifact preparation', () => {
+    const interposed = workflow.replace(
+      '      - name: Publish immutable release with provenance',
+      '      - name: Repack prepared artifact\n        run: node scripts/repack-release.mjs\n\n      - name: Publish immutable release with provenance',
+    );
+    expect(runGuard(interposed).status).not.toBe(0);
+    expect(runGuard(interposed).stderr).toContain(
+      'prepare, publication, and verification steps must be adjacent',
+    );
   });
 
   it.each([
