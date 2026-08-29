@@ -30,8 +30,8 @@ const EXPECTED_RESOLVER_RUN = [
   'echo "source_commit=${commit}" >> "${GITHUB_OUTPUT}"', // skipcq: JS-0038 - These must remain literal shell parameter expansions.
 ].join('\n');
 const EXPECTED_PREPARE = 'node scripts/prepare-publish.mjs';
-const EXPECTED_PUBLISH = ( // skipcq: JS-0246 - The GitHub expression is deliberately assembled as data.
-  'npm publish "'
+const EXPECTED_PUBLISH = (
+  'npm publish "' // skipcq: JS-0246 - The GitHub expression is deliberately assembled as data.
   + githubExpression('steps.release.outputs.tarball')
   + '" --access public --provenance --tag latest'
 );

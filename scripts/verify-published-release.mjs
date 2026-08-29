@@ -111,7 +111,7 @@ async function responseJson(response, description) {
   try {
     return await response.json();
   } catch {
-    throw new RegistryRequestError(`${description} returned invalid JSON`, { transient: true });
+    throw new RegistryRequestError(`${description} returned invalid JSON`);
   }
 }
 

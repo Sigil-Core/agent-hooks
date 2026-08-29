@@ -81,6 +81,29 @@ describe('prepare exact publication artifact', () => {
     })).resolves.toMatchObject({ publishRequired: true });
   });
 
+  it('rejects invalid registry JSON without retrying', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new SyntaxError('invalid JSON')),
+    } as Response);
+    const sleep = vi.fn(() => Promise.resolve());
+    const artifact = {
+      name: packageJson.name,
+      version: packageJson.version,
+      tarball: '/tmp/package.tgz',
+      size: 1,
+      shasum: 'a'.repeat(40),
+      integrity: `sha512-${Buffer.alloc(64, 7).toString('base64')}`,
+    };
+    await expect(determinePublication(packageJson, artifact, {
+      fetchImpl,
+      sleep,
+    })).rejects.toThrow(/returned invalid JSON/);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   it('fails closed after bounded transient package-document 404s', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(response({}, 404));
     const artifact = {
