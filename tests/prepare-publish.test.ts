@@ -44,7 +44,7 @@ describe('prepare exact publication artifact', () => {
   });
 
   it('publishes only when the exact version is absent', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(response({ versions: {} }));
+    const fetchImpl = vi.fn().mockResolvedValue(response({ name: packageJson.name, versions: {} }));
     const artifact = {
       name: packageJson.name,
       version: packageJson.version,
@@ -56,6 +56,29 @@ describe('prepare exact publication artifact', () => {
     await expect(determinePublication(packageJson, artifact, { fetchImpl })).resolves.toMatchObject({
       publishRequired: true,
     });
+  });
+
+  it('rejects malformed package metadata before publication', async () => {
+    const artifact = {
+      name: packageJson.name,
+      version: packageJson.version,
+      tarball: '/tmp/package.tgz',
+      size: 1,
+      shasum: 'a'.repeat(40),
+      integrity: `sha512-${Buffer.alloc(64, 7).toString('base64')}`,
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(response({}));
+    const sleep = vi.fn(() => Promise.resolve());
+    await expect(determinePublication(packageJson, artifact, {
+      fetchImpl,
+      sleep,
+    })).rejects.toThrow(/npm package document is malformed/);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+
+    await expect(determinePublication(packageJson, artifact, {
+      fetchImpl: vi.fn().mockResolvedValue(response({ name: packageJson.name, versions: {} })),
+    })).resolves.toMatchObject({ publishRequired: true });
   });
 
   it('fails closed after bounded transient package-document 404s', async () => {
@@ -78,7 +101,7 @@ describe('prepare exact publication artifact', () => {
       },
       deadlineMs: 5,
       retryDelayMs: 2,
-    })).rejects.toThrow(/package availability check exceeded 5 ms/);
+    })).rejects.toThrow(/publication preparation exceeded 5 ms/);
     expect(fetchImpl.mock.calls.length).toBeLessThanOrEqual(3);
   });
 
@@ -103,6 +126,7 @@ describe('prepare exact publication artifact', () => {
       },
     };
     const fetchImpl = vi.fn().mockResolvedValueOnce(response({
+      name: packageJson.name,
       versions: { '0.10.2': metadata },
       'dist-tags': { latest: '0.10.2' },
     }));
@@ -128,6 +152,7 @@ describe('prepare exact publication artifact', () => {
       },
     };
     const fetchImpl = vi.fn().mockResolvedValueOnce(response({
+      name: packageJson.name,
       versions: { '0.10.2': metadata },
       'dist-tags': { latest: '0.10.2' },
     }));
@@ -157,6 +182,7 @@ describe('prepare exact publication artifact', () => {
     const delayed = { ...exact, dist: { ...exact.dist, attestations: undefined } };
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(response({
+        name: packageJson.name,
         versions: { '0.10.2': delayed },
         'dist-tags': { latest: '0.10.1' },
       }))
@@ -173,6 +199,45 @@ describe('prepare exact publication artifact', () => {
       deadlineMs: 10,
       retryDelayMs: 1,
     })).resolves.toMatchObject({ publishRequired: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it('shares one deadline across availability and propagation retries', async () => {
+    const artifact = {
+      name: packageJson.name,
+      version: packageJson.version,
+      tarball: '/tmp/package.tgz',
+      size: 1,
+      shasum: 'a'.repeat(40),
+      integrity: `sha512-${Buffer.alloc(64, 7).toString('base64')}`,
+    };
+    const delayed = {
+      ...packageJson,
+      dist: {
+        shasum: artifact.shasum,
+        integrity: artifact.integrity,
+      },
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response({}, 503))
+      .mockResolvedValueOnce(response({
+        name: packageJson.name,
+        versions: { '0.10.2': delayed },
+        'dist-tags': { latest: '0.10.1' },
+      }))
+      .mockResolvedValueOnce(response({}, 503));
+    let clock = 0;
+    await expect(determinePublication(packageJson, artifact, {
+      fetchImpl,
+      now: () => clock,
+      sleep: (milliseconds: number) => {
+        clock += milliseconds;
+        return Promise.resolve();
+      },
+      deadlineMs: 10,
+      retryDelayMs: 9,
+    })).rejects.toThrow(/publication preparation exceeded 10 ms/);
+    expect(clock).toBeLessThanOrEqual(10);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 

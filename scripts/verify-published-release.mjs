@@ -74,11 +74,19 @@ export function verifyPublishedRelease(packageJson, metadata, artifact, latestVe
   }
   const expectedAttestationUrl =
     `${REGISTRY_URL}-/npm/v1/attestations/${packagePath(packageJson.name)}@${packageJson.version}`;
-  if (metadata?.dist?.attestations?.url !== expectedAttestationUrl) {
+  const attestationUrl = metadata?.dist?.attestations?.url;
+  if (attestationUrl === undefined) {
     throw new ReleaseVerificationError('published package attestation is not yet available', { retryable: true });
   }
-  if (metadata?.dist?.attestations?.provenance?.predicateType !== PREDICATE_TYPE) {
+  if (attestationUrl !== expectedAttestationUrl) {
+    throw new ReleaseVerificationError('published package attestation does not match the release identity');
+  }
+  const predicateType = metadata?.dist?.attestations?.provenance?.predicateType;
+  if (predicateType === undefined) {
     throw new ReleaseVerificationError('published package SLSA provenance is not yet available', { retryable: true });
+  }
+  if (predicateType !== PREDICATE_TYPE) {
+    throw new ReleaseVerificationError('published package SLSA provenance predicate does not match');
   }
   if (latestVersion !== packageJson.version) {
     throw new ReleaseVerificationError('latest dist-tag does not yet resolve to the release version', { retryable: true });
@@ -129,13 +137,35 @@ export async function fetchJson(url, { fetchImpl = fetch, timeoutMs = REQUEST_TI
   }
 }
 
-export async function readRegistryState(packageJson, options = {}) {
+export async function readRegistryState(
+  packageJson,
+  {
+    fetchImpl = fetch,
+    now = () => performance.now(),
+    requestTimeoutMs = REQUEST_TIMEOUT_MS,
+    deadlineAt = Number.POSITIVE_INFINITY,
+  } = {},
+) {
+  const requestOptions = () => {
+    const remaining = deadlineAt - now();
+    if (remaining <= 0) {
+      throw new RegistryRequestError('registry verification deadline elapsed', { transient: true });
+    }
+    return { fetchImpl, timeoutMs: Math.min(requestTimeoutMs, remaining) };
+  };
+  const requireTimeRemaining = () => {
+    if (now() >= deadlineAt) {
+      throw new RegistryRequestError('registry verification deadline elapsed', { transient: true });
+    }
+  };
   const encoded = packagePath(packageJson.name);
   const metadata = await fetchJson(
     `${REGISTRY_URL}${encoded}/${packageJson.version}`,
-    options,
+    requestOptions(),
   );
-  const packageDocument = await readPackageDocument(packageJson, options);
+  requireTimeRemaining();
+  const packageDocument = await readPackageDocument(packageJson, requestOptions());
+  requireTimeRemaining();
   return { metadata, latestVersion: packageDocument?.['dist-tags']?.latest };
 }
 
@@ -155,14 +185,15 @@ export async function verifyRegistryWithRetry(
     retryDelayMs = RETRY_DELAY_MS,
   } = {},
 ) {
-  const startedAt = now();
+  const deadlineAt = now() + deadlineMs;
   let lastError = new ReleaseVerificationError('no successful response');
-  while (now() - startedAt < deadlineMs) {
-    const remaining = deadlineMs - (now() - startedAt);
+  while (now() < deadlineAt) {
     try {
       const state = await readRegistryState(packageJson, {
         fetchImpl,
-        timeoutMs: Math.min(requestTimeoutMs, remaining),
+        now,
+        requestTimeoutMs,
+        deadlineAt,
       });
       return verifyPublishedRelease(packageJson, state.metadata, artifact, state.latestVersion);
     } catch (error) {
@@ -171,7 +202,7 @@ export async function verifyRegistryWithRetry(
         : error instanceof ReleaseVerificationError && error.retryable;
       if (!retryable) throw error;
       lastError = error;
-      const afterAttempt = deadlineMs - (now() - startedAt);
+      const afterAttempt = deadlineAt - now();
       if (afterAttempt <= 0) break;
       await sleep(Math.min(retryDelayMs, afterAttempt));
     }

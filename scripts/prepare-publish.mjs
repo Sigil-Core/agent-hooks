@@ -29,28 +29,38 @@ async function readPackageDocumentWithRetry(
     sleep = (milliseconds) => new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)),
     requestTimeoutMs = REQUEST_TIMEOUT_MS,
     deadlineMs = VERIFY_DEADLINE_MS,
+    deadlineAt = now() + deadlineMs,
     retryDelayMs = RETRY_DELAY_MS,
   } = {},
 ) {
-  const startedAt = now();
   let lastError = new RegistryRequestError('no successful response', { transient: true });
-  while (now() - startedAt < deadlineMs) {
-    const remaining = deadlineMs - (now() - startedAt);
+  while (now() < deadlineAt) {
+    const remaining = deadlineAt - now();
     try {
-      return await readPackageDocument(packageJson, {
+      const document = await readPackageDocument(packageJson, {
         fetchImpl,
         timeoutMs: Math.min(requestTimeoutMs, remaining),
       });
+      const versions = document?.versions;
+      if (
+        document?.name !== packageJson.name
+        || versions === null
+        || typeof versions !== 'object'
+        || Array.isArray(versions)
+      ) {
+        throw new RegistryRequestError('npm package document is malformed');
+      }
+      return document;
     } catch (error) {
       if (!(error instanceof RegistryRequestError) || !error.transient) throw error;
       lastError = error;
-      const afterAttempt = deadlineMs - (now() - startedAt);
+      const afterAttempt = deadlineAt - now();
       if (afterAttempt <= 0) break;
       await sleep(Math.min(retryDelayMs, afterAttempt));
     }
   }
   throw new PreparePublishError(
-    `package availability check exceeded ${deadlineMs} ms: ${lastError.message}`,
+    `publication preparation exceeded ${deadlineMs} ms: ${lastError.message}`,
   );
 }
 
@@ -96,7 +106,15 @@ export function packArtifact(
 }
 
 export async function determinePublication(packageJson, artifact, options = {}) {
-  const packageDocument = await readPackageDocumentWithRetry(packageJson, options);
+  const now = options.now ?? (() => performance.now());
+  const deadlineMs = options.deadlineMs ?? VERIFY_DEADLINE_MS;
+  const deadlineAt = now() + deadlineMs;
+  const packageDocument = await readPackageDocumentWithRetry(packageJson, {
+    ...options,
+    now,
+    deadlineMs,
+    deadlineAt,
+  });
   const metadata = packageDocument?.versions?.[packageJson.version];
   if (metadata === undefined) {
     return { publishRequired: true, reason: 'version is absent from npm' };
@@ -110,7 +128,24 @@ export async function determinePublication(packageJson, artifact, options = {}) 
     );
   } catch (error) {
     if (!(error instanceof ReleaseVerificationError) || !error.retryable) throw error;
-    await verifyRegistryWithRetry(packageJson, artifact, options);
+    const remaining = deadlineAt - now();
+    if (remaining <= 0) {
+      throw new PreparePublishError(`publication preparation exceeded ${deadlineMs} ms`);
+    }
+    try {
+      await verifyRegistryWithRetry(packageJson, artifact, {
+        ...options,
+        now,
+        deadlineMs: remaining,
+      });
+    } catch (verificationError) {
+      if (now() >= deadlineAt) {
+        throw new PreparePublishError(
+          `publication preparation exceeded ${deadlineMs} ms: ${verificationError.message}`,
+        );
+      }
+      throw verificationError;
+    }
   }
   return { publishRequired: false, reason: 'exact release already exists' };
 }

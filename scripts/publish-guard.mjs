@@ -13,18 +13,26 @@ const EXPECTED_REPOSITORY = 'git+https://github.com/Sigil-Core/agent-hooks.git';
 const EXPECTED_REGISTRY = 'https://registry.npmjs.org/';
 const EXPECTED_ENVIRONMENT = 'npm-production';
 const EXPECTED_JOB_CONDITION = "github.event_name == 'release'";
-const githubExpression = (body) => '$' + '{{ ' + body + ' }}';
+const githubExpression = (body) => '$' + '{{ ' + body + ' }}'; // skipcq: JS-0096, JS-0246 - Construct GitHub syntax without a JavaScript interpolation token.
 const EXPECTED_CHECKOUT_REF = githubExpression('github.event.release.tag_name');
 const EXPECTED_CHECKOUT = 'actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd';
 const EXPECTED_SETUP_NODE = 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020';
 const EXPECTED_INSTALL = 'npm install -g npm@11.17.0 --registry=https://registry.npmjs.org/';
 const EXPECTED_CI = 'npm ci --registry=https://registry.npmjs.org/';
 const EXPECTED_GUARD = 'npm run publish:guard';
-const EXPECTED_RESOLVER = 'node scripts/resolve-source-commit.mjs';
+const EXPECTED_RESOLVER_RUN = [
+  'set -euo pipefail',
+  'commit="$(node scripts/resolve-source-commit.mjs)"',
+  'if [ -z "${commit}" ]; then',
+  '  echo "resolve-source-commit: produced no commit" >&2',
+  '  exit 1',
+  'fi',
+  'echo "source_commit=${commit}" >> "${GITHUB_OUTPUT}"',
+].join('\n');
 const EXPECTED_PREPARE = 'node scripts/prepare-publish.mjs';
 const EXPECTED_PUBLISH = 'npm publish "'
   + githubExpression('steps.release.outputs.tarball')
-  + '" --access public --provenance --tag latest';
+  + '" --access public --provenance --tag latest'; // skipcq: JS-0246 - The GitHub expression is deliberately assembled as data.
 const EXPECTED_PUBLISH_CONDITION = "steps.release.outputs.publish_required == 'true'";
 const EXPECTED_VERIFY = 'node scripts/verify-published-release.mjs';
 
@@ -156,8 +164,12 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   assert(environment === EXPECTED_ENVIRONMENT, `publish job must use the ${EXPECTED_ENVIRONMENT} environment`);
 
   const permissions = effectivePermissions(plan.raw, job.raw);
-  assert(permissions.contents === 'read', 'publish job must be granted contents: read');
-  assert(permissions['id-token'] === 'write', 'publish job must be granted id-token: write');
+  assert(
+    Object.keys(permissions).length === 2
+      && permissions.contents === 'read'
+      && permissions['id-token'] === 'write',
+    'publish job permissions must be exactly contents: read and id-token: write',
+  );
 
   const steps = stepsOf(job.raw, job.id);
   assert(
@@ -180,7 +192,7 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   const installIndex = runIndex(steps, EXPECTED_INSTALL);
   const ciIndex = runIndex(steps, EXPECTED_CI);
   const guardIndex = runIndex(steps, EXPECTED_GUARD);
-  const resolverIndex = steps.findIndex((step) => typeof step?.run === 'string' && step.run.includes(EXPECTED_RESOLVER));
+  const resolverIndex = steps.findIndex((step) => step?.id === 'source_commit');
   const typecheckIndex = runIndex(steps, 'npm run typecheck');
   const lintIndex = runIndex(steps, 'npm run lint');
   const testIndex = runIndex(steps, 'npm test');
@@ -198,15 +210,23 @@ export function validatePublishContract({ workflowSource, packageJson }) {
       && testIndex < buildIndex && buildIndex < prepareIndex && prepareIndex < verifyIndex,
     'publish job release steps are out of order',
   );
+  assert(
+    [installIndex, ciIndex, guardIndex, resolverIndex, typecheckIndex, lintIndex, testIndex, buildIndex, prepareIndex, verifyIndex]
+      .every((index) => steps[index]?.if === undefined),
+    'mandatory release steps must be unconditional',
+  );
 
   const resolverStep = steps[resolverIndex];
-  assert(resolverStep?.id === 'source_commit', 'source resolver step must expose source_commit output');
+  assert(
+    resolverStep?.run?.trim() === EXPECTED_RESOLVER_RUN,
+    'source resolver step must execute the reviewed fail-closed resolver block',
+  );
   const buildStep = steps[buildIndex];
   assert(buildStep?.env?.SIGIL_SOURCE_COMMIT === githubExpression('steps.source_commit.outputs.source_commit'), 'build must receive the resolved source commit');
 
   const prepareStep = steps[prepareIndex];
   assert(prepareStep?.id === 'release', 'prepare step must expose release outputs');
-  assert(prepareStep?.env?.RELEASE_MANIFEST_PATH === githubExpression('runner.temp') + '/sigil-agent-hooks-release.json', 'prepare step must use the runner-temporary manifest');
+  assert(prepareStep?.env?.RELEASE_MANIFEST_PATH === githubExpression('runner.temp') + '/sigil-agent-hooks-release.json', 'prepare step must use the runner-temporary manifest'); // skipcq: JS-0246 - The exact workflow expression must remain data.
 
   const publications = steps.flatMap((step, stepIndex) => publicationCommands(step?.run).map((entry) => ({ ...entry, step, stepIndex })));
   assert(publications.every((entry) => entry.kind === 'direct'), 'workflow must not use npm stage publish');

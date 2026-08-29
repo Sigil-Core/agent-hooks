@@ -116,6 +116,63 @@ describe('published release verification', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    [
+      'attestation URL',
+      {
+        ...metadata,
+        dist: {
+          ...metadata.dist,
+          attestations: {
+            ...metadata.dist.attestations,
+            url: 'https://registry.npmjs.org/-/npm/v1/attestations/@sigilcore%2fother@0.10.2',
+          },
+        },
+      },
+      /attestation does not match the release identity/,
+    ],
+    [
+      'provenance predicate',
+      {
+        ...metadata,
+        dist: {
+          ...metadata.dist,
+          attestations: {
+            ...metadata.dist.attestations,
+            provenance: { predicateType: 'https://example.invalid/provenance' },
+          },
+        },
+      },
+      /provenance predicate does not match/,
+    ],
+  ])('does not retry a present conflicting %s', async (_label, conflicting, message) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(response(conflicting))
+      .mockResolvedValueOnce(response({ 'dist-tags': { latest: '0.10.2' } }));
+    await expect(verifyRegistryWithRetry(packageJson, artifact, { fetchImpl })).rejects.toThrow(message);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a sequential registry read that exceeds the shared deadline', async () => {
+    let clock = 0;
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => {
+        clock += 6;
+        return Promise.resolve(response(metadata));
+      })
+      .mockImplementationOnce(() => {
+        clock += 6;
+        return Promise.resolve(response({ 'dist-tags': { latest: '0.10.2' } }));
+      });
+    await expect(verifyRegistryWithRetry(packageJson, artifact, {
+      fetchImpl,
+      now: () => clock,
+      deadlineMs: 10,
+    })).rejects.toThrow(/registry verification exceeded 10 ms/);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(clock).toBe(12);
+  });
+
   it('stops at the shared retry deadline', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(response({}, 503));
     let clock = 0;

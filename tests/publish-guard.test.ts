@@ -15,10 +15,10 @@ const docs = [
   readFileSync(resolve(root, 'runtime.md'), 'utf8'),
 ].join('\n');
 const readme = readFileSync(resolve(root, 'README.md'), 'utf8');
-const githubExpression = (body: string) => '$' + '{{ ' + body + ' }}';
+const githubExpression = (body: string) => '$' + '{{ ' + body + ' }}'; // skipcq: JS-0096, JS-0246 - Construct GitHub syntax without a JavaScript interpolation token.
 const publishCommand = 'npm publish "'
   + githubExpression('steps.release.outputs.tarball')
-  + '" --access public --provenance --tag latest';
+  + '" --access public --provenance --tag latest'; // skipcq: JS-0246 - The GitHub expression is deliberately assembled as data.
 
 function runGuard(source = workflow) {
   const directory = mkdtempSync(join(tmpdir(), 'publish-guard-'));
@@ -85,7 +85,7 @@ describe('direct OIDC publication guard', () => {
 
     const secret = workflow.replace(
       '    runs-on: ubuntu-latest',
-      '    env:\n      NPM_TOKEN: ' + githubExpression('secrets.NPM_TOKEN') + '\n    runs-on: ubuntu-latest',
+      '    env:\n      NPM_TOKEN: ' + githubExpression('secrets.NPM_TOKEN') + '\n    runs-on: ubuntu-latest', // skipcq: JS-0246 - The fixture must contain literal GitHub syntax.
     );
     expect(runGuard(secret).stderr).toContain('must not reference NPM_TOKEN');
 
@@ -96,18 +96,37 @@ describe('direct OIDC publication guard', () => {
     expect(runGuard(continueOnError).stderr).toContain('must not continue on error');
   });
 
+  it('rejects additional publish-job permissions', () => {
+    const extraPermission = workflow.replace(
+      '      id-token: write',
+      '      id-token: write\n      actions: write',
+    );
+    expect(runGuard(extraPermission).stderr).toContain(
+      'permissions must be exactly contents: read and id-token: write',
+    );
+  });
+
   it('binds checkout and build identity to the release tag', () => {
-    const wrongRef = workflow.replace('ref: ' + githubExpression('github.event.release.tag_name'), 'ref: main');
+    const wrongRef = workflow.replace('ref: ' + githubExpression('github.event.release.tag_name'), 'ref: main'); // skipcq: JS-0246 - The fixture must contain literal GitHub syntax.
     expect(runGuard(wrongRef).stderr).toContain('release.tag_name');
 
     const shallow = workflow.replace('fetch-depth: 0', 'fetch-depth: 1');
     expect(runGuard(shallow).stderr).toContain('full history');
 
     const missingIdentity = workflow.replace(
-      'SIGIL_SOURCE_COMMIT: ' + githubExpression('steps.source_commit.outputs.source_commit'),
+      'SIGIL_SOURCE_COMMIT: ' + githubExpression('steps.source_commit.outputs.source_commit'), // skipcq: JS-0246 - The fixture must contain literal GitHub syntax.
       'SIGIL_SOURCE_COMMIT: deadbeef',
     );
     expect(runGuard(missingIdentity).stderr).toContain('resolved source commit');
+  });
+
+  it('rejects a commented-out source resolver with a substituted commit', () => {
+    const bypass = workflow.replace(
+      '          commit="$(node scripts/resolve-source-commit.mjs)"',
+      '          # node scripts/resolve-source-commit.mjs\n          commit="$(git rev-parse HEAD)"',
+    );
+    expect(runGuard(bypass).status).not.toBe(0);
+    expect(runGuard(bypass).stderr).toContain('reviewed fail-closed resolver block');
   });
 
   it('rejects missing or reordered verification steps', () => {
@@ -119,6 +138,14 @@ describe('direct OIDC publication guard', () => {
       '      - name: Verify trusted publication contract\n        run: npm run publish:guard\n\n      - run: npm ci --registry=https://registry.npmjs.org/',
     );
     expect(runGuard(reversed).stderr).toContain('out of order');
+  });
+
+  it('rejects conditional release verification', () => {
+    const conditional = workflow.replace(
+      '      - name: Verify exact registry release\n        env:',
+      '      - name: Verify exact registry release\n        if: false\n        env:',
+    );
+    expect(runGuard(conditional).stderr).toContain('mandatory release steps must be unconditional');
   });
 
   it('requires one visible exact direct publication command', () => {
@@ -138,7 +165,7 @@ describe('direct OIDC publication guard', () => {
     expect(runGuard(wrongTag).stderr).toContain('publication command must be exactly');
 
     const operand = workflow.replace(
-      'npm publish "' + githubExpression('steps.release.outputs.tarball') + '"',
+      'npm publish "' + githubExpression('steps.release.outputs.tarball') + '"', // skipcq: JS-0246 - The fixture must contain literal GitHub syntax.
       'npm publish package.tgz',
     );
     expect(runGuard(operand).stderr).toContain('publication command must be exactly');
