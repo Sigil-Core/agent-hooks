@@ -1,58 +1,56 @@
 # @sigilcore/agent-hooks Runtime Notes
 
-## npm staged publish path
+## npm direct OIDC release path
 
-`@sigilcore/agent-hooks` publishes from GitHub Actions workflow
-`.github/workflows/publish.yml` using npm trusted publishing through OIDC.
-The workflow must keep these properties aligned:
+`@sigilcore/agent-hooks` publishes from `.github/workflows/publish.yml` through
+an npm trusted publisher. Keep these values aligned:
 
 - GitHub repository: `Sigil-Core/agent-hooks`
-- Workflow filename in npm trusted publisher settings: `publish.yml`
-- Runner: GitHub-hosted `ubuntu-latest`
-- Staged-job permissions: `id-token: write` and `contents: read`
-- Node: `22.14.0` or newer
-- npm CLI: `11.17.0` (pinned by the workflow)
-- `package.json` repository URL:
-  `git+https://github.com/Sigil-Core/agent-hooks.git`
+- Workflow filename: `publish.yml`
 - GitHub environment: `npm-production`
-- Staged command:
-  `npm stage publish --access public --provenance --tag fleet-phase6`
-- Release verification: `node scripts/verify-published-release.mjs`
+- Runner: GitHub-hosted `ubuntu-latest`
+- Release-job permissions: `contents: read` and `id-token: write`
+- Node: `22.14.0`
+- npm CLI: `11.17.0`
+- `setup-node`: pinned v7 commit, package-manager caching disabled
+- Registry: `https://registry.npmjs.org/`
+- Repository URL: `git+https://github.com/Sigil-Core/agent-hooks.git`
+- Publish mode: direct, public, provenance enabled, tag `latest`
 
-The workflow does not need an `NPM_TOKEN` repository secret when trusted
-publishing is configured. `gh secret list --repo Sigil-Core/agent-hooks`
-returned no repository secrets on June 22, 2026. The environment name in the
-workflow is only effective after a protected GitHub `npm-production`
-environment and the matching npm trusted-publisher environment are configured.
-That external rollout prerequisite is intentionally not performed here.
+Routine releases need no npm token, browser session, passkey, or TOTP. The npm
+trusted publisher must allow direct publication for this repository, workflow,
+and environment. A stage-only relationship is incompatible.
 
-The Phase 6 staged acceptance and rollback rules are in
-[`docs/publishing.md`](docs/publishing.md). The same production package and
-trusted publisher are used throughout. After exact staged approval, the
-`fleet-phase6` tag is moved to the prior version to rehearse rollback, restored
-to the approved candidate, and then `latest` may move. No version or sole
-`latest` release is deleted.
+The release tag must equal `v<package.version>`. The workflow proves the tag's
+commit is on `origin/main`, runs the full test and build gates, packs one exact
+tarball, publishes only when that version is absent, and verifies the tarball
+digests, repository, provenance, and `latest` from npm. An exact existing
+release is a successful idempotent rerun. Any immutable mismatch fails closed.
 
-## Known failure mode
+Rollback uses the next patch from a reviewed revert. Routine automation does
+not delete versions or move `latest` backward.
 
-If `npm stage publish --access public` fails with `E404 Not Found` for an existing
-scoped package, do not assume the package is missing. For trusted publishing,
-check the npm package trusted publisher configuration and the `repository.url`
-field in `package.json`. npm requires the package metadata to match the GitHub
-repository that is authorized as the trusted publisher. If `npm trust list`
-returns `E401`, the local npm auth can read package metadata but cannot manage
-trusted-publisher settings. If staging returns `OIDC permission denied for this
-action`, replace a legacy publish-only trusted publisher with a stage-only
-relationship for `publish.yml` and environment `npm-production`.
+## One-time trusted-publisher maintenance
 
-Verification baseline before rerunning publish:
+Converting the old relationship requires authenticated npm CLI access. Revoke
+the old relationship, create one direct publisher for the same repository,
+workflow, and environment, then verify it before publishing `v0.10.2`. npm may
+require a fresh TOTP for each trust-management command. This is the last
+expected interactive npm step; it is not part of future releases.
+
+If npm reports OIDC permission denied, inspect the trusted-publisher record
+instead of adding `NPM_TOKEN`. If npm already contains the version, do not
+republish it. Run the exact-artifact verifier and either accept an exact match
+or publish the next patch after fixing the mismatch.
+
+Verification baseline before creating a release:
 
 ```bash
+npm run publish:guard
 npm run typecheck
 npm run lint
 npm test
 npm run build
-npm view @sigilcore/agent-hooks version dist-tags name repository --json
 ```
 
 ## CodeRabbit local review support note

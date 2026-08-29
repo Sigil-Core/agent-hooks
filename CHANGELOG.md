@@ -4,6 +4,8 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-29
+
 ### Added
 
 - Observability-only build identity on every authorize request.
@@ -22,6 +24,24 @@ All notable changes to this project are documented here. Format follows [Keep a 
   commit, the annotated tag object SHA is never emitted, the commit must be an
   ancestor of `origin/main` and must be the checked-out tree, and every other
   outcome fails closed.
+
+### Changed
+
+- npm releases now publish directly from the protected GitHub release workflow
+  through the package's trusted OIDC publisher. The workflow publishes one
+  immutable tarball under `latest` with provenance and uses no npm token.
+- Ambiguous reruns pack the same artifact again and skip publication only when
+  npm already has the exact SHA-1, SHA-512 integrity, repository, provenance,
+  and `latest` binding. Any immutable mismatch fails closed.
+
+### Security
+
+- Registry propagation checks use a 15-second request timeout and a shared
+  180-second deadline. Only transient registry failures, delayed provenance,
+  and delayed `latest` propagation retry. Authentication, authorization, and
+  immutable digest failures do not retry.
+- Rollback publishes the next reviewed patch from a revert. Routine release
+  automation never rewrites an existing version or moves a dist-tag backward.
 
 ## [0.10.0] - 2026-08-21
 

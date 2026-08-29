@@ -1,78 +1,69 @@
-# Agent Hooks publishing acceptance
+# Agent Hooks publishing
 
-Production publication is an npm trusted-publishing operation from the
-GitHub-hosted `ubuntu-latest` runner. The workflow requests `id-token: write`,
-uses the exact `git+https://github.com/Sigil-Core/agent-hooks.git` repository
-URL, and publishes with provenance. It does not use an `NPM_TOKEN` secret.
-The workflow names the `npm-production` GitHub environment. That name is not a
-gate by itself.
+`@sigilcore/agent-hooks` publishes from GitHub Actions through an npm trusted
+publisher. GitHub supplies a short-lived OIDC identity for each release. No
+long-lived npm token, passkey, browser session, or TOTP is part of a routine
+release.
 
-Two external controls back that name.
+The trust boundary has two matching controls:
 
-1. **A protected GitHub `npm-production` environment.** Created 2026-08-17 and
-   restricted to protected branches, so only `main` can deploy to it.
-2. **The npm trusted publisher for this package.** npm treats the environment
-   field as optional and validates only the fields it has recorded, so
-   publication keeps working whether or not that field is set. Setting it to
-   `npm-production` is what turns the environment name into an actual
-   restriction rather than a label. Until it is set, the environment is
-   documentation, not a gate.
+1. The GitHub `npm-production` environment permits only protected branches.
+2. npm trusts `Sigil-Core/agent-hooks`, `.github/workflows/publish.yml`, and the
+   `npm-production` environment for direct publication.
 
-Production publication is stage-only. The Phase 6 candidate path is a manual
-staged publication from the protected workflow and environment. It makes the
-candidate unavailable to public installs until an operator completes npm's
-proof-of-presence approval. A GitHub release never publishes a package.
+The npm relationship must allow direct publish. A stage-only relationship will
+reject this workflow and must not be used as a fallback.
 
-## Published source commit
+## Release contract
 
-The staged publish job checks out full history and every tag, then resolves one commit
-before it builds. `scripts/resolve-source-commit.mjs` peels the release ref with
-`^{commit}`, so an annotated tag yields the commit it points at and the tag
-object SHA is never emitted; the same peel covers a branch trigger, where an
-event can report a tag object as the commit. It then requires that commit to be
-an ancestor of `origin/main`, requires the checked-out tree to be that commit,
-and fails closed on every other outcome — including a checkout with no
-`origin/main` to compare against. The resolved commit is injected into the build
-as `SIGIL_SOURCE_COMMIT` and is what the published artifact reports on
-`X-Sigil-Client`. A local or fork build with no such value omits `commit`
-instead of guessing.
+A release starts only when GitHub publishes a release. The workflow:
 
-## Phase 6 staged release and rollback
+1. Checks out the release tag with full history and no persisted GitHub
+   credentials.
+2. Requires the tag to equal `v<package.version>`.
+3. Peels the tag to a commit, proves that commit is an ancestor of
+   `origin/main`, and requires the checked-out `HEAD` to be that commit.
+4. Runs the publication guard, type checking, lint, tests, and build.
+5. Packs one exact tarball and computes its SHA-1 and SHA-512 integrity.
+6. Publishes that tarball once with public access, provenance, and the `latest`
+   tag when the version is absent.
+7. Verifies the exact tarball digests, repository, SLSA provenance, and
+   `latest` binding from npm.
 
-`publish.yml` contains one manual `stage-publish` job. It builds the exact
-`main` commit with the same checks as the release job, then submits the package
-with `npm stage publish` under the non-latest `fleet-phase6` dist-tag. The
-trusted publisher must allow staged publication. The job cannot make the
-version publicly installable or move `latest` by itself.
+The workflow exposes one publication command. It has `id-token: write` only in
+the protected release job and never references `NPM_TOKEN`.
+The pinned `setup-node` action does not require `NODE_AUTH_TOKEN`, and package
+manager caching is disabled in the privileged release job.
 
-The publication guard permits exactly one staged command in the manual job. A
-direct `npm publish` is invalid there. The guard rejects a second command, a
-command hidden in a different step, or a direct publish spelled with backslash
-escapes or quote characters. Its shell handling is deliberately bounded: it
-does not resolve variable expansion, command substitution, `eval`, or encoded
-payloads. See `docs/architecture.md` for the full boundary.
+## Safe reruns
 
-The production package has one stage-only trusted npm publisher: this workflow
-for `Sigil-Core/agent-hooks`. No npm token is stored in GitHub. The release job
-has no OIDC permission or publishing registry and fails unless the exact
-package version already exists with sha512 integrity and SLSA provenance.
+An interrupted publish can leave the registry changed even when GitHub reports
+failure. A rerun packs the release again before deciding what to do.
 
-Acceptance is bound to the exact staged package name, version, tarball digest,
-repository metadata, provenance receipt, and reviewed workflow ref. Keep the
-previous version available under the non-latest `fleet-phase6` rollback tag
-while these checks run.
+- If the version is absent, the workflow publishes once.
+- If the exact version, digests, repository, provenance, and `latest` binding
+  already exist, the workflow skips publication and verifies the release.
+- If an immutable field differs, the workflow fails. It does not overwrite the
+  version or accept a different artifact.
 
-After the exact staged approval is recorded, the operator rehearses rollback
-by moving `fleet-phase6` to the previous version and proving that version
-resolves, then restores `fleet-phase6` to the approved candidate. Only then may
-the operator move `latest` to the approved version. If the staged artifact or
-its approval changes, stop and start a new staged run instead of repeating the
-repoint.
+Post-publish verification uses a 15-second timeout per registry request and one
+180-second deadline. It retries only transient registry responses, delayed
+provenance, and delayed `latest` propagation. Authentication, authorization,
+validation, and digest mismatches fail immediately.
 
-## One-challenge rule
+## Rollback
 
-Once the trusted publisher allows staged publication only, the
-`npm-production` gate permits one challenge for an exact staged artifact.
-When the challenge is not satisfied, the run stops. A new artifact and a fresh
-staged review are required before another challenge or any `latest` repoint.
-This prevents repeated prompts from becoming an implicit approval loop.
+npm versions are immutable. Rollback means reverting the source, reviewing the
+revert, increasing the patch version, and publishing the next patch through the
+same release workflow. Routine automation never deletes a version or moves
+`latest` backward. An emergency operator may move a dist-tag through npm's
+recovery procedure, but that is not the normal release path.
+
+## One-time trust conversion
+
+Moving from the former stage-only relationship to direct OIDC publication is a
+one-time npm account operation. Revoke the old relationship, create the direct
+publisher for the same repository, workflow, and environment, then verify it
+before publishing a GitHub release. npm may require fresh TOTP values for those
+trust-management commands. After conversion, normal releases require no user
+authentication.
