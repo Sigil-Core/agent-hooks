@@ -4,14 +4,13 @@ on:
   release:
     types:
       - published
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  stage-publish:
-    if: github.event_name == 'workflow_dispatch'
+  publish-release:
+    if: github.event_name == 'release'
     permissions:
       contents: read
       id-token: write
@@ -24,15 +23,21 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           fetch-tags: true
+          ref: ${{ github.event.release.tag_name }}
 
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22.14.0
           registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
 
       - run: npm install -g npm@11.17.0 --registry=https://registry.npmjs.org/
+      - run: npm ci --registry=https://registry.npmjs.org/
 
-      - name: Resolve staged source commit
+      - name: Verify trusted publication contract
+        run: npm run publish:guard
+
+      - name: Resolve release source commit
         id: source_commit
         run: |
           set -euo pipefail
@@ -43,11 +48,6 @@ jobs:
           fi
           echo "source_commit=${commit}" >> "${GITHUB_OUTPUT}"
 
-      - run: npm ci --registry=https://registry.npmjs.org/
-
-      - name: Verify trusted publication contract
-        run: npm run publish:guard
-
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
@@ -55,38 +55,17 @@ jobs:
         env:
           SIGIL_SOURCE_COMMIT: ${{ steps.source_commit.outputs.source_commit }}
 
-      - name: Stage reviewed package under the Phase 6 tag
-        run: npm stage publish --access public --provenance --tag fleet-phase6
+      - name: Prepare exact release artifact
+        id: release
+        env:
+          RELEASE_MANIFEST_PATH: ${{ runner.temp }}/sigil-agent-hooks-release.json
+        run: node scripts/prepare-publish.mjs
 
-  verify-release:
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    steps:
-      # Full history and every tag, so the release commit can be peeled and
-      # proven to be an ancestor of origin/main. A shallow checkout would leave
-      # the ancestry check unable to resolve origin/main, and the resolver fails
-      # closed on that rather than publishing anyway.
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-          fetch-tags: true
+      - name: Publish immutable release with provenance
+        if: steps.release.outputs.publish_required == 'true'
+        run: npm publish "${{ steps.release.outputs.tarball }}" --access public --provenance --tag latest
 
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: 22.14.0
-
-      - run: npm install -g npm@11.17.0 --registry=https://registry.npmjs.org/
-
-      - run: npm ci --registry=https://registry.npmjs.org/
-
-      - name: Verify trusted publication contract
-        run: npm run publish:guard
-
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
-
-      - name: Require the approved staged package
+      - name: Verify exact registry release
+        env:
+          RELEASE_MANIFEST_PATH: ${{ steps.release.outputs.manifest }}
         run: node scripts/verify-published-release.mjs

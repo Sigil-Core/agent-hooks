@@ -1,18 +1,17 @@
 # @sigilcore/agent-hooks Architecture
 
 `@sigilcore/agent-hooks` is a public npm package that intercepts agent tool
-calls before execution and routes them to Sigil Sign for pre-execution policy
-evaluation.
+calls before execution and routes them to Sigil Sign for policy evaluation.
 
 ## Package boundary
 
 The package stays framework-agnostic at the core:
 
-- Core interceptor maps a proposed tool call into a Sigil intent.
+- The core interceptor maps a proposed tool call into a Sigil intent.
 - Adapters translate Claude Code, Codex, Hermes, OpenClaw, OpenRouter,
   AgentPay, and other framework shapes into the core intent contract.
-- Model-budget helpers keep a task-local usage ledger and submit cumulative
-  `metadata.model_usage` reports through the same `/v1/authorize` contract.
+- Model-budget helpers keep task-local usage and submit cumulative
+  `metadata.model_usage` through the same `/v1/authorize` contract.
 - Sigil Sign remains the policy engine and attestation issuer.
 - Agent Hooks does not embed Sigil Lex or production policy evaluation logic.
 
@@ -31,49 +30,43 @@ Only `dist/` and `README.md` publish to npm.
 Publishing uses npm trusted publishing from GitHub Actions, not a long-lived npm
 token. The trust chain is:
 
-1. `.github/workflows/publish.yml` runs on GitHub-hosted Actions.
-2. The workflow requests an OIDC token via `permissions.id-token: write`.
-3. The workflow names the `npm-production` GitHub environment. A protected
-   environment and the matching npm trusted-publisher environment must be
-   configured before this is an effective human release gate.
-4. npm validates the trusted publisher configuration for
-   `Sigil-Core/agent-hooks` and `publish.yml`.
-5. The manual Phase 6 path submits the candidate with
-   `npm stage publish --access public --provenance --tag fleet-phase6`. The
-   release path only verifies that the approved version already exists with
-   registry integrity and SLSA provenance.
+1. A published GitHub release starts `.github/workflows/publish.yml` on
+   GitHub-hosted `ubuntu-latest`.
+2. The one release job receives `contents: read` and `id-token: write` inside
+   the protected `npm-production` environment.
+   The pinned `setup-node` action uses its OIDC-safe path and disables package
+   manager caching for the privileged job.
+3. The release tag must equal `v<package.version>`, peel to the checked-out
+   commit, and name a commit on `origin/main`.
+4. The workflow packs one exact tarball after tests and build.
+5. npm validates the OIDC identity against its trusted publisher for
+   `Sigil-Core/agent-hooks`, `publish.yml`, and `npm-production`.
+6. The workflow publishes the tarball directly with public access, SLSA
+   provenance, and `latest`, then reads npm back and verifies the same artifact.
 
-Only the manual path can publish the production package, through the stage-only
-trusted publisher and protected `npm-production` environment. The
-reusable `scripts/publish-guard.mjs` check confines the manual job to the
-GitHub-hosted runner, public npm registry, exact `fleet-phase6` tag, public
-access, provenance, and staged-only publication. The tag is moved to the prior
-version for rollback rehearsal, restored to the approved candidate, and only
-then may `latest` move.
+`scripts/prepare-publish.mjs` makes an interrupted run idempotent. It skips the
+publication command only when npm already contains the exact SHA-1, SHA-512
+integrity, repository, provenance, and `latest` binding. A different immutable
+artifact fails closed. `scripts/verify-published-release.mjs` retries bounded
+registry propagation but never retries an authentication, authorization, or
+digest failure.
 
-**The guard parses the workflow; it does not match its text.** It reads the
-YAML into an object model and asserts against resolved values, so block
-scalars, inline mappings, quoting style, and key order all normalise before any
-check runs. This replaced a regex-over-source implementation whose every
-high-severity defect was the same mistake in a new place: an escape that
-escaped nothing and let a lookalike registry host pass, a substring test
-satisfied by `--provenance=false`, and a permission check that matched a grant
-to any job in the file rather than the publish job.
+`scripts/publish-guard.mjs` parses the workflow as YAML and enforces the static
+boundary: release-only trigger, one protected GitHub-hosted job, exact
+permissions, exact registry, tag-bound checkout, required test ordering, no
+`NPM_TOKEN`, one visible direct publication command, provenance, public access,
+`latest`, and exact post-publish verification. It detects escaped and quoted
+spellings of `npm publish` so a second command cannot hide behind formatting.
 
-**What the guard does and does not promise.** It is a static control against
-drift and accident, not against an authenticated attacker who can already edit
-the workflow. It normalises backslash escapes and quote characters in shell
-commands, so `n\pm publish` and `'"npm" publish'` are caught alongside the
-literal spelling. It does not interpret variable expansion, command
-substitution, `eval`, encoded payloads, or `$IFS` manipulation, and it is not a
-shell interpreter. Anyone who can merge a workflow change can defeat it; the
-control that matters against that threat is review of the workflow diff, which
-is why `.github/workflows/**` is a security-seam path.
+The guard controls drift and mistakes. It is not a shell interpreter and does
+not defeat an authenticated attacker who can merge a workflow change. Review
+of `.github/workflows/**` remains the security control for variable expansion,
+command substitution, encoded payloads, and other shell semantics.
 
-The production package has one npm trusted publisher for this workflow. That
-publisher allows staged publication only; no temporary package, direct
-publication authority, second publisher, or bootstrap tag is part of the
-Phase 6 design.
+The production package has one trusted publisher for this workflow. No second
+publisher or bootstrap package is required. The `repository.url` in
+`package.json` is part of the trust boundary and remains
+`git+https://github.com/Sigil-Core/agent-hooks.git`.
 
-The `repository.url` in `package.json` is part of that trust boundary and must
-remain `git+https://github.com/Sigil-Core/agent-hooks.git`.
+Rollback does not overwrite a package or move `latest` backward. It publishes
+the next patch from a reviewed revert through the same OIDC release path.

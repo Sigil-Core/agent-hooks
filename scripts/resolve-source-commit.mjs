@@ -8,14 +8,9 @@
  * fork or a stale branch produced. This script is the only thing that decides
  * it, and it fails closed.
  *
- * It handles both trigger shapes:
- *
- *   - `GITHUB_REF_TYPE=tag` (the release event): the ref is peeled with
- *     `^{commit}`, so an annotated tag yields the commit it points at. The tag
- *     object SHA is never emitted.
- *   - `GITHUB_REF_TYPE=branch` (a manual dispatch): `GITHUB_SHA` is peeled the
- *     same way, which also repairs the annotated-tag case where an event
- *     reports a tag object SHA rather than a commit.
+ * It accepts only a release tag whose name is exactly `v<package.version>`.
+ * The tag is peeled with `^{commit}`, so an annotated tag yields the commit it
+ * points at. The tag object SHA is never emitted.
  *
  * The resolved commit is then required to be an ancestor of `origin/main`. The
  * checkout supplies the history this needs: `fetch-depth: 0` plus
@@ -28,8 +23,9 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { env, stderr as standardError, stdout as standardOut } from 'node:process';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
@@ -86,13 +82,6 @@ function peelToCommit(git, description, objectName) {
   return commit;
 }
 
-function requiredSha(sha) {
-  if (typeof sha !== 'string' || !COMMIT_PATTERN.test(sha)) {
-    throw new SourceCommitError('GITHUB_SHA is missing or not a 40-hex object name.');
-  }
-  return sha;
-}
-
 function tagNameFromRef(ref) {
   if (typeof ref !== 'string' || ref.length === 0) {
     throw new SourceCommitError('GITHUB_REF is missing.');
@@ -110,24 +99,27 @@ function tagNameFromRef(ref) {
  * @param {{
  *   ref?: string,
  *   refType?: string,
- *   sha?: string,
+ *   packageVersion?: string,
  *   git: (args: string[]) => {status: number | null, stdout: string | Buffer},
  * }} input
  * @returns {string} The 40-hex source commit.
  */
-export function resolveSourceCommit({ ref, refType, sha, git }) {
-  if (refType !== 'tag' && refType !== 'branch') {
-    throw new SourceCommitError(
-      `GITHUB_REF_TYPE must be 'tag' or 'branch', got ${String(refType)}.`,
-    );
+export function resolveSourceCommit({ ref, refType, packageVersion, git }) {
+  if (refType !== 'tag') {
+    throw new SourceCommitError(`GITHUB_REF_TYPE must be 'tag', got ${String(refType)}.`);
   }
-
-  const source = refType === 'tag'
-    ? `refs/tags/${tagNameFromRef(ref)}`
-    : requiredSha(sha);
+  if (typeof packageVersion !== 'string' || packageVersion.length === 0) {
+    throw new SourceCommitError('package version is missing.');
+  }
+  const tagName = tagNameFromRef(ref);
+  const expectedTag = `v${packageVersion}`;
+  if (tagName !== expectedTag) {
+    throw new SourceCommitError(`release tag ${tagName} does not match package version ${expectedTag}.`);
+  }
+  const source = `refs/tags/${tagName}`;
   const candidate = peelToCommit(
     git,
-    refType === 'tag' ? `tag ${source.slice('refs/tags/'.length)}` : 'event commit',
+    `tag ${tagName}`,
     source,
   );
 
@@ -163,13 +155,15 @@ export function resolveSourceCommit({ ref, refType, sha, git }) {
 }
 
 const gitFromSpawn = (args) => spawnSync('git', args, { encoding: 'utf8' });
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function main() {
   try {
+    const packageJson = JSON.parse(readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8'));
     standardOut.write(`${resolveSourceCommit({
       ref: env.GITHUB_REF,
       refType: env.GITHUB_REF_TYPE,
-      sha: env.GITHUB_SHA,
+      packageVersion: packageJson.version,
       git: gitFromSpawn,
     })}\n`);
   } catch (error) {
