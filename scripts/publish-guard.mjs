@@ -13,7 +13,8 @@ const EXPECTED_REPOSITORY = 'git+https://github.com/Sigil-Core/agent-hooks.git';
 const EXPECTED_REGISTRY = 'https://registry.npmjs.org/';
 const EXPECTED_ENVIRONMENT = 'npm-production';
 const EXPECTED_JOB_CONDITION = "github.event_name == 'release'";
-const EXPECTED_CHECKOUT_REF = '${{ github.event.release.tag_name }}';
+const githubExpression = (body) => '$' + '{{ ' + body + ' }}';
+const EXPECTED_CHECKOUT_REF = githubExpression('github.event.release.tag_name');
 const EXPECTED_CHECKOUT = 'actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd';
 const EXPECTED_SETUP_NODE = 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020';
 const EXPECTED_INSTALL = 'npm install -g npm@11.17.0 --registry=https://registry.npmjs.org/';
@@ -21,7 +22,9 @@ const EXPECTED_CI = 'npm ci --registry=https://registry.npmjs.org/';
 const EXPECTED_GUARD = 'npm run publish:guard';
 const EXPECTED_RESOLVER = 'node scripts/resolve-source-commit.mjs';
 const EXPECTED_PREPARE = 'node scripts/prepare-publish.mjs';
-const EXPECTED_PUBLISH = 'npm publish "${{ steps.release.outputs.tarball }}" --access public --provenance --tag latest';
+const EXPECTED_PUBLISH = 'npm publish "'
+  + githubExpression('steps.release.outputs.tarball')
+  + '" --access public --provenance --tag latest';
 const EXPECTED_PUBLISH_CONDITION = "steps.release.outputs.publish_required == 'true'";
 const EXPECTED_VERIFY = 'node scripts/verify-published-release.mjs';
 
@@ -199,11 +202,11 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   const resolverStep = steps[resolverIndex];
   assert(resolverStep?.id === 'source_commit', 'source resolver step must expose source_commit output');
   const buildStep = steps[buildIndex];
-  assert(buildStep?.env?.SIGIL_SOURCE_COMMIT === '${{ steps.source_commit.outputs.source_commit }}', 'build must receive the resolved source commit');
+  assert(buildStep?.env?.SIGIL_SOURCE_COMMIT === githubExpression('steps.source_commit.outputs.source_commit'), 'build must receive the resolved source commit');
 
   const prepareStep = steps[prepareIndex];
   assert(prepareStep?.id === 'release', 'prepare step must expose release outputs');
-  assert(prepareStep?.env?.RELEASE_MANIFEST_PATH === '${{ runner.temp }}/sigil-agent-hooks-release.json', 'prepare step must use the runner-temporary manifest');
+  assert(prepareStep?.env?.RELEASE_MANIFEST_PATH === githubExpression('runner.temp') + '/sigil-agent-hooks-release.json', 'prepare step must use the runner-temporary manifest');
 
   const publications = steps.flatMap((step, stepIndex) => publicationCommands(step?.run).map((entry) => ({ ...entry, step, stepIndex })));
   assert(publications.every((entry) => entry.kind === 'direct'), 'workflow must not use npm stage publish');
@@ -217,7 +220,7 @@ export function validatePublishContract({ workflowSource, packageJson }) {
   assert(/(^|\s)--tag\s+latest(\s|$)/.test(publication.command), 'publication must use the latest tag');
 
   const verifyStep = steps[verifyIndex];
-  assert(verifyStep?.env?.RELEASE_MANIFEST_PATH === '${{ steps.release.outputs.manifest }}', 'verification must consume the exact prepared manifest');
+  assert(verifyStep?.env?.RELEASE_MANIFEST_PATH === githubExpression('steps.release.outputs.manifest'), 'verification must consume the exact prepared manifest');
 
   return { job: job.id, publication: publication.rawShellCommand, verification: EXPECTED_VERIFY };
 }

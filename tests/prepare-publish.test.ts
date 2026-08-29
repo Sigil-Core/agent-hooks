@@ -17,7 +17,7 @@ const packageJson = {
 };
 
 function response(body: unknown, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+  return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) } as Response;
 }
 
 describe('prepare exact publication artifact', () => {
@@ -142,7 +142,10 @@ describe('prepare exact publication artifact', () => {
     await expect(determinePublication(packageJson, artifact, {
       fetchImpl,
       now: () => clock,
-      sleep: async (milliseconds: number) => { clock += milliseconds; },
+      sleep: (milliseconds: number) => {
+        clock += milliseconds;
+        return Promise.resolve();
+      },
       deadlineMs: 10,
       retryDelayMs: 1,
     })).resolves.toMatchObject({ publishRequired: false });

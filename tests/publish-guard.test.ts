@@ -15,7 +15,10 @@ const docs = [
   readFileSync(resolve(root, 'runtime.md'), 'utf8'),
 ].join('\n');
 const readme = readFileSync(resolve(root, 'README.md'), 'utf8');
-const publishCommand = 'npm publish "${{ steps.release.outputs.tarball }}" --access public --provenance --tag latest';
+const githubExpression = (body: string) => '$' + '{{ ' + body + ' }}';
+const publishCommand = 'npm publish "'
+  + githubExpression('steps.release.outputs.tarball')
+  + '" --access public --provenance --tag latest';
 
 function runGuard(source = workflow) {
   const directory = mkdtempSync(join(tmpdir(), 'publish-guard-'));
@@ -80,7 +83,10 @@ describe('direct OIDC publication guard', () => {
     const cacheEnabled = workflow.replace('package-manager-cache: false', 'package-manager-cache: true');
     expect(runGuard(cacheEnabled).stderr).toContain('caching must be disabled');
 
-    const secret = workflow.replace('    runs-on: ubuntu-latest', '    env:\n      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}\n    runs-on: ubuntu-latest');
+    const secret = workflow.replace(
+      '    runs-on: ubuntu-latest',
+      '    env:\n      NPM_TOKEN: ' + githubExpression('secrets.NPM_TOKEN') + '\n    runs-on: ubuntu-latest',
+    );
     expect(runGuard(secret).stderr).toContain('must not reference NPM_TOKEN');
 
     const registryOverride = workflow.replace('    runs-on: ubuntu-latest', '    env:\n      NPM_CONFIG_REGISTRY: https://registry.example.invalid/\n    runs-on: ubuntu-latest');
@@ -91,13 +97,16 @@ describe('direct OIDC publication guard', () => {
   });
 
   it('binds checkout and build identity to the release tag', () => {
-    const wrongRef = workflow.replace('ref: ${{ github.event.release.tag_name }}', 'ref: main');
+    const wrongRef = workflow.replace('ref: ' + githubExpression('github.event.release.tag_name'), 'ref: main');
     expect(runGuard(wrongRef).stderr).toContain('release.tag_name');
 
     const shallow = workflow.replace('fetch-depth: 0', 'fetch-depth: 1');
     expect(runGuard(shallow).stderr).toContain('full history');
 
-    const missingIdentity = workflow.replace('SIGIL_SOURCE_COMMIT: ${{ steps.source_commit.outputs.source_commit }}', 'SIGIL_SOURCE_COMMIT: deadbeef');
+    const missingIdentity = workflow.replace(
+      'SIGIL_SOURCE_COMMIT: ' + githubExpression('steps.source_commit.outputs.source_commit'),
+      'SIGIL_SOURCE_COMMIT: deadbeef',
+    );
     expect(runGuard(missingIdentity).stderr).toContain('resolved source commit');
   });
 
@@ -128,7 +137,10 @@ describe('direct OIDC publication guard', () => {
     const wrongTag = workflow.replace('--tag latest', '--tag fleet-phase6');
     expect(runGuard(wrongTag).stderr).toContain('publication command must be exactly');
 
-    const operand = workflow.replace('npm publish "${{ steps.release.outputs.tarball }}"', 'npm publish package.tgz');
+    const operand = workflow.replace(
+      'npm publish "' + githubExpression('steps.release.outputs.tarball') + '"',
+      'npm publish package.tgz',
+    );
     expect(runGuard(operand).stderr).toContain('publication command must be exactly');
 
     const unconditional = workflow.replace("if: steps.release.outputs.publish_required == 'true'", 'if: always()');

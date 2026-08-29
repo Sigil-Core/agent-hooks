@@ -34,7 +34,7 @@ const metadata = {
 };
 
 function response(body: unknown, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+  return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) } as Response;
 }
 
 describe('published release verification', () => {
@@ -73,7 +73,10 @@ describe('published release verification', () => {
     const result = await verifyRegistryWithRetry(packageJson, artifact, {
       fetchImpl,
       now: () => clock,
-      sleep: async (milliseconds: number) => { clock += milliseconds; },
+      sleep: (milliseconds: number) => {
+        clock += milliseconds;
+        return Promise.resolve();
+      },
       deadlineMs: 10,
       retryDelayMs: 1,
     });
@@ -95,7 +98,10 @@ describe('published release verification', () => {
     await expect(verifyRegistryWithRetry(packageJson, artifact, {
       fetchImpl,
       now: () => clock,
-      sleep: async (milliseconds: number) => { clock += milliseconds; },
+      sleep: (milliseconds: number) => {
+        clock += milliseconds;
+        return Promise.resolve();
+      },
       deadlineMs: 10,
       retryDelayMs: 1,
     })).resolves.toMatchObject({ version: '0.10.2' });
@@ -116,7 +122,10 @@ describe('published release verification', () => {
     await expect(verifyRegistryWithRetry(packageJson, artifact, {
       fetchImpl,
       now: () => clock,
-      sleep: async (milliseconds: number) => { clock += milliseconds; },
+      sleep: (milliseconds: number) => {
+        clock += milliseconds;
+        return Promise.resolve();
+      },
       deadlineMs: 5,
       retryDelayMs: 2,
     })).rejects.toThrow(/exceeded 5 ms/);
@@ -125,7 +134,7 @@ describe('published release verification', () => {
 
   it('classifies authorization failures as non-transient', async () => {
     await expect(fetchJson('https://registry.npmjs.org/example', {
-      fetchImpl: async () => response({}, 403),
+      fetchImpl: () => Promise.resolve(response({}, 403)),
     })).rejects.toMatchObject<Partial<RegistryRequestError>>({ transient: false, status: 403 });
   });
 });

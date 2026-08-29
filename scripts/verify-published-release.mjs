@@ -139,7 +139,7 @@ export async function readRegistryState(packageJson, options = {}) {
   return { metadata, latestVersion: packageDocument?.['dist-tags']?.latest };
 }
 
-export async function readPackageDocument(packageJson, options = {}) {
+export function readPackageDocument(packageJson, options = {}) {
   return fetchJson(`${REGISTRY_URL}${packagePath(packageJson.name)}`, options);
 }
 
@@ -156,7 +156,7 @@ export async function verifyRegistryWithRetry(
   } = {},
 ) {
   const startedAt = now();
-  let lastError;
+  let lastError = new ReleaseVerificationError('no successful response');
   while (now() - startedAt < deadlineMs) {
     const remaining = deadlineMs - (now() - startedAt);
     try {
@@ -177,7 +177,7 @@ export async function verifyRegistryWithRetry(
     }
   }
   throw new ReleaseVerificationError(
-    `registry verification exceeded ${deadlineMs} ms: ${lastError?.message ?? 'no successful response'}`,
+    `registry verification exceeded ${deadlineMs} ms: ${lastError.message}`,
   );
 }
 

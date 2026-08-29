@@ -42,12 +42,13 @@ export function packArtifact(
   },
 ) {
   const directory = mkdtempSync(join(outputRoot, 'agent-hooks-pack-'));
-  let report;
-  try {
-    report = JSON.parse(pack(['pack', '--json', '--pack-destination', directory]));
-  } catch {
-    throw new PreparePublishError('npm pack did not return valid JSON');
-  }
+  const report = (() => {
+    try {
+      return JSON.parse(pack(['pack', '--json', '--pack-destination', directory]));
+    } catch {
+      throw new PreparePublishError('npm pack did not return valid JSON');
+    }
+  })();
   if (!Array.isArray(report) || report.length !== 1 || typeof report[0]?.filename !== 'string') {
     throw new PreparePublishError('npm pack did not return exactly one artifact');
   }
