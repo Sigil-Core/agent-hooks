@@ -16,9 +16,11 @@ const docs = [
 ].join('\n');
 const readme = readFileSync(resolve(root, 'README.md'), 'utf8');
 const githubExpression = (body: string) => '$' + '{{ ' + body + ' }}'; // skipcq: JS-0096, JS-0246 - Construct GitHub syntax without a JavaScript interpolation token.
-const publishCommand = 'npm publish "'
+const publishCommand = ( // skipcq: JS-0246 - The GitHub expression is deliberately assembled as data.
+  'npm publish "'
   + githubExpression('steps.release.outputs.tarball')
-  + '" --access public --provenance --tag latest'; // skipcq: JS-0246 - The GitHub expression is deliberately assembled as data.
+  + '" --access public --provenance --tag latest'
+);
 
 function runGuard(source = workflow) {
   const directory = mkdtempSync(join(tmpdir(), 'publish-guard-'));

@@ -23,16 +23,18 @@ const EXPECTED_GUARD = 'npm run publish:guard';
 const EXPECTED_RESOLVER_RUN = [
   'set -euo pipefail',
   'commit="$(node scripts/resolve-source-commit.mjs)"',
-  'if [ -z "${commit}" ]; then',
+  'if [ -z "${commit}" ]; then', // skipcq: JS-0038 - This must remain literal shell parameter expansion.
   '  echo "resolve-source-commit: produced no commit" >&2',
   '  exit 1',
   'fi',
-  'echo "source_commit=${commit}" >> "${GITHUB_OUTPUT}"',
+  'echo "source_commit=${commit}" >> "${GITHUB_OUTPUT}"', // skipcq: JS-0038 - These must remain literal shell parameter expansions.
 ].join('\n');
 const EXPECTED_PREPARE = 'node scripts/prepare-publish.mjs';
-const EXPECTED_PUBLISH = 'npm publish "'
+const EXPECTED_PUBLISH = ( // skipcq: JS-0246 - The GitHub expression is deliberately assembled as data.
+  'npm publish "'
   + githubExpression('steps.release.outputs.tarball')
-  + '" --access public --provenance --tag latest'; // skipcq: JS-0246 - The GitHub expression is deliberately assembled as data.
+  + '" --access public --provenance --tag latest'
+);
 const EXPECTED_PUBLISH_CONDITION = "steps.release.outputs.publish_required == 'true'";
 const EXPECTED_VERIFY = 'node scripts/verify-published-release.mjs';
 
