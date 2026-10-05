@@ -686,4 +686,4 @@ MIT
 
 ## Development runtime
 
-Building and running the test suite requires Node.js 20.19 or newer, or Node.js 22.12 or newer. The published library retains its documented Node.js 20 runtime support.
+Building and running the test suite requires Node.js 20.19 or newer, or Node.js 22.13 or newer. The published library retains its documented Node.js 20 runtime support.
