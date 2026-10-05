@@ -275,11 +275,11 @@ describe('MCP CallToolResult projection v1', () => {
       ),
     );
 
-    expect(projectCallToolResult({ content: [], structuredContent })).toEqual({
-      ok: false,
-      reason: 'projection_limit',
-    });
-    expect(descriptorCopy).not.toHaveBeenCalled();
+    const projected = projectCallToolResult({ content: [], structuredContent });
+    const descriptorCopies = descriptorCopy.mock.calls.length;
+    descriptorCopy.mockRestore();
+    expect(projected).toEqual({ ok: false, reason: 'projection_limit' });
+    expect(descriptorCopies).toBe(0);
   });
 
   it('canonicalizes a wide in-budget object without bulk descriptor copying', () => {
@@ -288,8 +288,11 @@ describe('MCP CallToolResult projection v1', () => {
       Array.from({ length: 5_000 }, (_, index) => [`key-${index.toString().padStart(5, '0')}`, null]),
     );
 
-    expect(projectCallToolResult({ content: [], structuredContent }).ok).toBe(true);
-    expect(descriptorCopy).not.toHaveBeenCalled();
+    const projected = projectCallToolResult({ content: [], structuredContent });
+    const descriptorCopies = descriptorCopy.mock.calls.length;
+    descriptorCopy.mockRestore();
+    expect(projected.ok).toBe(true);
+    expect(descriptorCopies).toBe(0);
   });
 
   it('writes a wide record set into one preallocated frame without Buffer.concat', () => {
