@@ -15,7 +15,7 @@ const EXPECTED_ENVIRONMENT = 'npm-production';
 const EXPECTED_JOB_CONDITION = "github.event_name == 'release'";
 const githubExpression = (body) => '$' + '{{ ' + body + ' }}'; // skipcq: JS-0096, JS-0246 - Construct GitHub syntax without a JavaScript interpolation token.
 const EXPECTED_CHECKOUT_REF = githubExpression('github.event.release.tag_name');
-const EXPECTED_CHECKOUT = 'actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd';
+const EXPECTED_CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1';
 const EXPECTED_SETUP_NODE = 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020';
 const EXPECTED_INSTALL = 'npm install -g npm@11.17.0 --registry=https://registry.npmjs.org/';
 const EXPECTED_CI = 'npm ci --registry=https://registry.npmjs.org/';

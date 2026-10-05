@@ -221,8 +221,8 @@ describe('direct OIDC publication guard', () => {
 
   it('rejects ambiguous steps and malformed YAML', () => {
     const ambiguous = workflow.replace(
-      '      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5',
-      '      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5\n        run: echo invalid',
+      '      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+      '      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        run: echo invalid',
     );
     const result = evaluate(`guard.parseWorkflow(${JSON.stringify(ambiguous)});`);
     expect(result.status).toBe(0);
